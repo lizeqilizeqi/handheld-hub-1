@@ -14,10 +14,10 @@ if command -v docker >/dev/null 2>&1 && [[ -d "$APP_DIR" ]]; then
   git pull origin main 2>/dev/null || true
 fi
 
-if [[ -f "$APP_DIR/deploy/import-migration-bundle.sh" ]]; then
-  bash "$APP_DIR/deploy/import-migration-bundle.sh" || true
-elif curl -fsSL "$RAW" -o "$IMPORT" 2>/dev/null; then
+if curl -fsSL "$RAW" -o "$IMPORT" 2>/dev/null; then
   bash "$IMPORT" || true
+elif [[ -f "$APP_DIR/deploy/import-migration-bundle.sh" ]]; then
+  bash "$APP_DIR/deploy/import-migration-bundle.sh" || true
 else
   echo "WARN: could not load import script"
 fi

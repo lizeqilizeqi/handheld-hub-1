@@ -35,11 +35,15 @@ New-Item -ItemType Directory -Path (Split-Path $TarPath) -Force | Out-Null
 
 Write-Step "Exporting MySQL database"
 $sqlPath = Join-Path $OutDir "database.sql"
+$dumpInContainer = "mysqldump -u handheld -phandheld --single-transaction --routines --triggers --add-drop-table --no-tablespaces handheld_hub"
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-docker compose -f $ComposeFile exec -T db mysqldump -u handheld -phandheld `
-    --single-transaction --routines --triggers --add-drop-table `
-    handheld_hub 2>&1 | Where-Object { $_ -notmatch '^\s*mysqldump: \[Warning\]' } | Set-Content -Path $sqlPath -Encoding UTF8
+docker compose -f $ComposeFile exec -T db sh -c "$dumpInContainer > /tmp/hh-dump.sql" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    throw "mysqldump inside container failed"
+}
+docker compose -f $ComposeFile cp "db:/tmp/hh-dump.sql" $sqlPath 2>$null
+docker compose -f $ComposeFile exec -T db rm -f /tmp/hh-dump.sql 2>$null
 $ErrorActionPreference = $prevEap
 if (-not (Test-Path $sqlPath) -or (Get-Item $sqlPath).Length -lt 1000) {
     throw "database.sql export failed or file too small"

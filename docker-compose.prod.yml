@@ -1,45 +1,90 @@
 # Production stack for Ubuntu / GCP (e2-micro friendly). Use:
-#   docker compose -f docker-compose.prod.yml up -d --build
+
+#   docker compose -f docker-compose.prod.yml up -d
+
 services:
+
   db:
+
     image: mysql:8.0
+
     restart: unless-stopped
+
     environment:
+
       MYSQL_DATABASE: handheld_hub
+
       MYSQL_USER: handheld
+
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-handheld}
+
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+
     command:
+
       - --innodb-buffer-pool-size=64M
+
       - --performance-schema=OFF
+
       - --skip-log-bin
+
     volumes:
+
       - hh_mysql_data:/var/lib/mysql
+
     healthcheck:
+
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+
       interval: 10s
+
       timeout: 5s
+
       retries: 12
 
+
+
   web:
+
     build: .
+
     restart: unless-stopped
+
     ports:
+
       - "80:80"
+
     volumes:
+
       - ./:/var/www/html
+
+      - ./deploy/apache-storage.conf:/etc/apache2/conf-enabled/zzz-storage-handhelds.conf:ro
+
     working_dir: /var/www/html
+
     depends_on:
+
       db:
+
         condition: service_healthy
+
     command: >
+
       bash -c "chmod 644 /var/www/html/config.local.php 2>/dev/null || true;
+
       chmod 644 /var/www/html/config.secrets.php 2>/dev/null || true;
+
       mkdir -p /var/www/html/storage/app/logs /var/www/html/storage/handhelds &&
+
       chown -R www-data:www-data /var/www/html/storage &&
+
       chmod -R 775 /var/www/html/storage/app/logs &&
-      grep -q 'Directory /var/www/html/storage/handhelds' /etc/apache2/apache2.conf || printf '%s\n' '<Directory /var/www/html/storage/handhelds>' '    Options -Indexes' '    Require all granted' '</Directory>' >> /etc/apache2/apache2.conf &&
+
       apache2-foreground"
 
+
+
 volumes:
+
   hh_mysql_data:
+

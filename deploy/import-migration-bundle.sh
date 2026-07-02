@@ -104,17 +104,19 @@ for i in $(seq 1 90); do
 done
 
 SQL_CLEAN="${WORK}/database-clean.sql"
-log "sanitize database.sql (strip BOM / mysqldump noise)"
+log "sanitize database.sql"
 sed '1s/^\xEF\xBB\xBF//; /^mysqldump:/d; /^mysql: \[Warning\]/d' "${BUNDLE_ROOT}/database.sql" > "$SQL_CLEAN"
 first_line="$(head -1 "$SQL_CLEAN" || true)"
+log "sql first line: $first_line"
 case "$first_line" in
-  --*|'/*!'*) ;;
-  *) die "database.sql invalid after sanitize, first line: ${first_line}" ;;
+  --*) ;;
+  *) die "database.sql invalid after sanitize" ;;
 esac
 
-log "import database"
-if ! docker compose -f "$COMPOSE_FILE" exec -T db mysql -u handheld -phandheld handheld_hub < "$SQL_CLEAN" >>"$LOG" 2>&1; then
-  die "mysql import failed, see $LOG"
+log "import database (docker cp)"
+docker compose -f "$COMPOSE_FILE" cp "$SQL_CLEAN" db:/tmp/hh-import.sql
+if ! docker compose -f "$COMPOSE_FILE" exec -T db sh -c 'mysql -u handheld -phandheld handheld_hub < /tmp/hh-import.sql' >>"$LOG" 2>&1; then
+  die "mysql import failed"
 fi
 
 log "run migrations"

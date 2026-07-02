@@ -286,7 +286,7 @@ function hh_image_public_url($path)
 {
     $path = ltrim(str_replace('\\', '/', (string) $path), '/');
     $path = preg_replace('#^storage/handhelds/#', '', $path);
-    return hh_base_url() . '/i/' . $path;
+    return hh_base_url() . '/img.php?f=' . rawurlencode($path);
 }
 
 function hh_specs_table_html($specs, $locale = 'en')

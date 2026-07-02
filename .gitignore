@@ -8,3 +8,4 @@ storage/public/*
 .env
 *.log
 vendor/
+deploy/out/

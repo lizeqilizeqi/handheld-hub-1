@@ -7,6 +7,8 @@ hh_admin_require_login();
 require_once __DIR__ . '/layout.php';
 
 $serverIp = isset($_GET['ip']) ? trim((string) $_GET['ip']) : '35.212.252.17';
+$domain = isset($_GET['domain']) ? trim((string) $_GET['domain']) : 'oldman.dpdns.org';
+$siteUrl = $domain !== '' ? 'http://' . preg_replace('#^https?://#', '', $domain) : 'http://' . $serverIp;
 $repoUrl = isset($_GET['repo']) ? trim((string) $_GET['repo']) : 'https://github.com/lizeqilizeqi/handheld-hub-1.git';
 $branch = isset($_GET['branch']) ? trim((string) $_GET['branch']) : 'main';
 $appDir = '/opt/handheld-hub';
@@ -41,6 +43,10 @@ $syncSecrets = 'scp config.secrets.php YOUR_USER@' . $serverIp . ':' . $appDir .
 $syncImages = 'rsync -avz --progress storage/handhelds/ YOUR_USER@' . $serverIp . ':' . $appDir . '/storage/handhelds/';
 $syncDb = 'docker compose -f docker-compose.prod.yml exec -T db mysqldump -u handheld -phandheld handheld_hub | ssh YOUR_USER@' . $serverIp . ' "docker compose -f ' . $appDir . '/docker-compose.prod.yml exec -T db mysql -u handheld -phandheld handheld_hub"';
 
+$exportLocal = '.\\deploy\\export-local-migration.ps1 -BaseUrl "' . $siteUrl . '"';
+$oauthRedirect = $siteUrl . '/admin/blogger_oauth.php';
+$bundlePath = 'deploy\\out\\hh-migration-bundle.tar.gz';
+
 hh_admin_layout_start('deploy');
 ?>
 
@@ -64,6 +70,8 @@ hh_admin_layout_start('deploy');
     <input type="text" name="branch" value="<?php echo hh_h($branch); ?>" style="width:120px;">
     <label>服务器 IP</label>
     <input type="text" name="ip" value="<?php echo hh_h($serverIp); ?>" style="width:160px;">
+    <label>域名（可选）</label>
+    <input type="text" name="domain" placeholder="oldman.dpdns.org" value="<?php echo hh_h($domain); ?>" style="width:200px;">
     <button type="submit" class="btn btn-secondary">生成命令</button>
   </form>
 </div>
@@ -90,22 +98,35 @@ hh_admin_layout_start('deploy');
 </div>
 
 <div class="card">
-  <h3>从本地迁移已有数据（可选）</h3>
-  <p>若本地 Docker 里已有抓取数据、图片、OAuth 密钥，在<strong>本机 PowerShell</strong>执行（把 <code>YOUR_USER</code> 换成 SSH 用户名，GCP 浏览器 SSH 一般是你的 Google 账号对应用户）：</p>
-  <p><strong>1. 密钥与 OAuth</strong></p>
+  <h3>从本地一键迁移（推荐）</h3>
+  <p>把本地 <strong>数据库、OAuth 密钥、掌机图片、配置</strong> 打成一个包，上传到 GCP 后由启动脚本自动导入。无需在后台重新填 OAuth。</p>
+  <p><strong>1. 本机 PowerShell</strong>（项目根目录）</p>
+  <pre class="code-block" id="cmd-export"><?php echo hh_h($exportLocal); ?></pre>
+  <button type="button" class="btn btn-secondary btn-copy" data-target="cmd-export">复制</button>
+  <p class="muted" style="margin-top:.75rem;">会生成 <code><?php echo hh_h($bundlePath); ?></code>（含 508+ 条掌机数据、<code>hh_blogger_oauth</code> token 等）。</p>
+  <p><strong>2. GCP 浏览器 SSH</strong> → 右上角「上传文件」→ 选 <code>hh-migration-bundle.tar.gz</code>（会到 home 目录）</p>
+  <p><strong>3. GCP 实例 → 修改 → 启动脚本</strong>：粘贴仓库里 <code>deploy/gcp-startup-script.sh</code> 全文 → 保存 → <strong>重置</strong> VM（不要用 Stop）</p>
+  <p><strong>4. Google OAuth 凭据</strong>（只需加一行，不用新建客户端）：</p>
+  <pre class="code-block"><?php echo hh_h($oauthRedirect); ?></pre>
+  <p class="muted">导入完成后访问 <a href="<?php echo hh_h($siteUrl); ?>/admin/blogger.php" target="_blank" rel="noopener"><?php echo hh_h($siteUrl); ?>/admin/blogger.php</a>，应显示「已连接 Google」。</p>
+</div>
+
+<div class="card">
+  <h3>从本地迁移 · 手动分步（可选）</h3>
+  <p>若 scp/rsync 可用，也可分开同步：</p>
+  <p><strong>1. 密钥</strong></p>
   <pre class="code-block"><?php echo hh_h($syncSecrets); ?></pre>
   <p><strong>2. 掌机图片</strong></p>
   <pre class="code-block"><?php echo hh_h($syncImages); ?></pre>
-  <p><strong>3. 数据库</strong>（在 handheld-hub 项目目录）</p>
+  <p><strong>3. 数据库</strong></p>
   <pre class="code-block"><?php echo hh_h($syncDb); ?></pre>
-  <p class="muted">迁移后把 <code>config.local.php</code> 里的 <code>app.base_url</code> 改为 <code>http://<?php echo hh_h($serverIp); ?></code>，并在 Google Cloud OAuth 里把 Redirect URI 改成 <code>http://<?php echo hh_h($serverIp); ?>/admin/blogger_oauth.php</code>。</p>
 </div>
 
 <div class="card">
   <h3>部署后访问</h3>
   <ul>
-    <li>前台：<a href="http://<?php echo hh_h($serverIp); ?>/en/handhelds" target="_blank" rel="noopener">http://<?php echo hh_h($serverIp); ?>/en/handhelds</a></li>
-    <li>后台：<a href="http://<?php echo hh_h($serverIp); ?>/admin/" target="_blank" rel="noopener">http://<?php echo hh_h($serverIp); ?>/admin/</a></li>
+    <li>前台：<a href="<?php echo hh_h($siteUrl); ?>/en/handhelds" target="_blank" rel="noopener"><?php echo hh_h($siteUrl); ?>/en/handhelds</a></li>
+    <li>后台：<a href="<?php echo hh_h($siteUrl); ?>/admin/" target="_blank" rel="noopener"><?php echo hh_h($siteUrl); ?>/admin/</a></li>
   </ul>
 </div>
 

@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Legacy helper — prefer deploy/server-deploy.sh on the VM.
+# Legacy helper — use deploy/export-local-migration.ps1 + deploy/import-migration-bundle.sh
+
 set -euo pipefail
-echo "Use deploy/server-deploy.sh on the server instead."
-echo "  sudo bash deploy/server-deploy.sh"
+
+echo "本地导出（PowerShell）："
+echo "  .\\deploy\\export-local-migration.ps1"
 echo ""
-echo "To sync files from your PC (optional):"
-REMOTE="${1:-user@your-server}"
-REMOTE_DIR="${2:-/opt/handheld-hub}"
-echo "  rsync -avz --exclude config.local.php --exclude config.secrets.php ./ ${REMOTE}:${REMOTE_DIR}/"
-echo "  rsync -avz ./storage/handhelds/ ${REMOTE}:${REMOTE_DIR}/storage/handhelds/"
+echo "上传到 GCP SSH home 目录后，启动脚本会自动导入。"
+echo "或手动：sudo bash /opt/handheld-hub/deploy/import-migration-bundle.sh ~/hh-migration-bundle.tar.gz"

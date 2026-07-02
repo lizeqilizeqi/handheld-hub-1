@@ -38,6 +38,7 @@ services:
       mkdir -p /var/www/html/storage/app/logs /var/www/html/storage/handhelds &&
       chown -R www-data:www-data /var/www/html/storage &&
       chmod -R 775 /var/www/html/storage/app/logs &&
+      grep -q 'Directory /var/www/html/storage/handhelds' /etc/apache2/apache2.conf || printf '%s\n' '<Directory /var/www/html/storage/handhelds>' '    Options -Indexes' '    Require all granted' '</Directory>' >> /etc/apache2/apache2.conf &&
       apache2-foreground"
 
 volumes:

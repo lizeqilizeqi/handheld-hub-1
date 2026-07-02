@@ -1,0 +1,41 @@
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: handheld_hub
+      MYSQL_USER: handheld
+      MYSQL_PASSWORD: handheld
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3307:3306"
+    volumes:
+      - hh_mysql_data:/var/lib/mysql
+      - ./sql/migration_001_handhelds.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    image: php:8.3-apache
+    ports:
+      - "8080:80"
+    volumes:
+      - ./:/var/www/html
+    working_dir: /var/www/html
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      bash -c "docker-php-ext-install pdo pdo_mysql &&
+      a2enmod rewrite &&
+      sed -i 's!/var/www/html!/var/www/html/public!g' /etc/apache2/sites-available/000-default.conf &&
+      printf '%s\n' 'Alias /admin /var/www/html/admin' 'Alias /storage/handhelds /var/www/html/storage/handhelds' >> /etc/apache2/apache2.conf &&
+      mkdir -p /var/www/html/storage/app/logs /var/www/html/storage/handhelds &&
+      chown -R www-data:www-data /var/www/html/storage &&
+      chmod -R 775 /var/www/html/storage/app/logs &&
+      apache2-foreground"
+
+volumes:
+  hh_mysql_data:

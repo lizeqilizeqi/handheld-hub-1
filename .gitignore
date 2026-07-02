@@ -1,0 +1,10 @@
+config.local.php
+config.secrets.php
+.run/
+storage/handhelds/*
+!storage/handhelds/.gitkeep
+storage/public/*
+!storage/public/.gitkeep
+.env
+*.log
+vendor/

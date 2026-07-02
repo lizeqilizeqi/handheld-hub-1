@@ -11,12 +11,29 @@ $repoUrl = isset($_GET['repo']) ? trim((string) $_GET['repo']) : 'https://github
 $branch = isset($_GET['branch']) ? trim((string) $_GET['branch']) : 'main';
 $appDir = '/opt/handheld-hub';
 
-$firstLine = $repoUrl !== ''
-    ? 'export REPO_URL="' . $repoUrl . '"'
-    : 'export REPO_URL="https://github.com/你的用户名/handheld-hub.git"';
+function hh_deploy_github_slug($repoUrl)
+{
+    $repoUrl = preg_replace('#\.git$#', '', trim($repoUrl));
+    $repoUrl = preg_replace('#^https?://github.com/#', '', $repoUrl);
+    return trim($repoUrl, '/');
+}
+
+function hh_deploy_raw_script_url($repoUrl, $branch)
+{
+    $slug = hh_deploy_github_slug($repoUrl);
+    return 'https://raw.githubusercontent.com/' . $slug . '/' . rawurlencode($branch) . '/deploy/server-deploy.sh';
+}
+
+$rawScriptUrl = $repoUrl !== '' ? hh_deploy_raw_script_url($repoUrl, $branch) : 'https://raw.githubusercontent.com/你的用户名/handheld-hub/main/deploy/server-deploy.sh';
+
+$firstLine = 'export REPO_URL="' . ($repoUrl !== '' ? $repoUrl : 'https://github.com/你的用户名/handheld-hub.git') . '"';
 
 $firstDeploy = $firstLine . "\n"
-    . 'curl -fsSL "$REPO_URL/raw/' . $branch . '/deploy/server-deploy.sh" | sudo -E bash';
+    . 'curl -fsSL "' . $rawScriptUrl . '" | sudo REPO_URL="$REPO_URL" bash';
+
+$firstDeployAlt = "sudo apt-get update && sudo apt-get install -y git\n"
+    . 'sudo git clone "' . ($repoUrl !== '' ? $repoUrl : 'https://github.com/你/handheld-hub.git') . '" ' . $appDir . "\n"
+    . 'sudo bash ' . $appDir . '/deploy/server-deploy.sh';
 
 $updateCmd = 'sudo bash ' . $appDir . '/deploy/server-deploy.sh';
 
@@ -56,6 +73,13 @@ hh_admin_layout_start('deploy');
   <pre class="code-block" id="cmd-first"><?php echo hh_h($firstDeploy); ?></pre>
   <button type="button" class="btn btn-secondary btn-copy" data-target="cmd-first">复制</button>
   <p class="muted" style="margin-top:.75rem;">脚本会自动：装 Docker、加 swap、克隆代码、生成 config.local.php、启动 MySQL + PHP，并跑数据库迁移。站点监听 <strong>80</strong> 端口。</p>
+  <p class="muted">若 curl 仍 404（私有仓库），用下方备用方案。</p>
+</div>
+
+<div class="card">
+  <h3>首次部署 · 备用（git clone，私有仓库可用）</h3>
+  <pre class="code-block" id="cmd-first-alt"><?php echo hh_h($firstDeployAlt); ?></pre>
+  <button type="button" class="btn btn-secondary btn-copy" data-target="cmd-first-alt">复制</button>
 </div>
 
 <div class="card">

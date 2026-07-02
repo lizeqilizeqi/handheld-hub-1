@@ -2,7 +2,7 @@
 # Handheld Hub — GCP / Ubuntu one-shot deploy & update.
 # First time (set your Git repo URL):
 #   export REPO_URL="https://github.com/YOU/handheld-hub.git"
-#   curl -fsSL "$REPO_URL/raw/main/deploy/server-deploy.sh" | sudo -E bash
+#   curl -fsSL "https://raw.githubusercontent.com/YOU/handheld-hub/main/deploy/server-deploy.sh" | sudo REPO_URL="$REPO_URL" bash
 #
 # Later updates (same command, or from server):
 #   sudo bash /opt/handheld-hub/deploy/server-deploy.sh
@@ -82,7 +82,7 @@ ensure_code() {
   if [[ -z "$REPO_URL" ]]; then
     die "首次部署请设置 Git 仓库地址，例如：
   export REPO_URL=\"https://github.com/YOU/handheld-hub.git\"
-  curl -fsSL \"\$REPO_URL/raw/main/deploy/server-deploy.sh\" | sudo -E bash"
+  curl -fsSL \"https://raw.githubusercontent.com/YOU/handheld-hub/main/deploy/server-deploy.sh\" | sudo REPO_URL=\"\$REPO_URL\" bash"
   fi
 
   log "克隆仓库到 ${APP_DIR}"

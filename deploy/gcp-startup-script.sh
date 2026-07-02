@@ -1,6 +1,11 @@
 #!/bin/bash
-# GCP VM startup script — 导入迁移包 + 修正权限 + 重启（root 执行）
+# GCP VM startup script — git pull, import migration bundle, fix permissions, restart (root)
 APP_DIR="/opt/handheld-hub"
+
+if command -v docker >/dev/null 2>&1 && [[ -d "$APP_DIR" ]]; then
+  cd "$APP_DIR"
+  git pull origin main 2>/dev/null || true
+fi
 
 if [[ -d "$APP_DIR" && -f "$APP_DIR/deploy/import-migration-bundle.sh" ]]; then
   bash "$APP_DIR/deploy/import-migration-bundle.sh" || true
@@ -20,6 +25,5 @@ fi
 
 if command -v docker >/dev/null 2>&1 && [[ -d "$APP_DIR" ]]; then
   cd "$APP_DIR"
-  git pull origin main 2>/dev/null || true
   docker compose -f docker-compose.prod.yml up -d --build
 fi

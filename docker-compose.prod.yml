@@ -33,7 +33,9 @@ services:
       db:
         condition: service_healthy
     command: >
-      bash -c "mkdir -p /var/www/html/storage/app/logs /var/www/html/storage/handhelds &&
+      bash -c "chmod 644 /var/www/html/config.local.php 2>/dev/null || true;
+      chmod 644 /var/www/html/config.secrets.php 2>/dev/null || true;
+      mkdir -p /var/www/html/storage/app/logs /var/www/html/storage/handhelds &&
       chown -R www-data:www-data /var/www/html/storage &&
       chmod -R 775 /var/www/html/storage/app/logs &&
       apache2-foreground"

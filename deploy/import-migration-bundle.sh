@@ -105,10 +105,12 @@ done
 
 SQL_CLEAN="${WORK}/database-clean.sql"
 log "sanitize database.sql (strip BOM / mysqldump noise)"
-grep -v '^mysqldump:' "${BUNDLE_ROOT}/database.sql" | sed '1s/^\xEF\xBB\xBF//' > "$SQL_CLEAN"
-if [[ ! -s "$SQL_CLEAN" ]]; then
-  die "database.sql empty after sanitize"
-fi
+sed '1s/^\xEF\xBB\xBF//; /^mysqldump:/d; /^mysql: \[Warning\]/d' "${BUNDLE_ROOT}/database.sql" > "$SQL_CLEAN"
+first_line="$(head -1 "$SQL_CLEAN" || true)"
+case "$first_line" in
+  --*|'/*!'*) ;;
+  *) die "database.sql invalid after sanitize, first line: ${first_line}" ;;
+esac
 
 log "import database"
 if ! docker compose -f "$COMPOSE_FILE" exec -T db mysql -u handheld -phandheld handheld_hub < "$SQL_CLEAN" >>"$LOG" 2>&1; then

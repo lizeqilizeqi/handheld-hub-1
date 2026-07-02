@@ -285,10 +285,8 @@ function hh_handheld_replace_images(PDO $pdo, $handheldId, $images)
 function hh_image_public_url($path)
 {
     $path = ltrim(str_replace('\\', '/', (string) $path), '/');
-    if (strpos($path, 'storage/handhelds/') === 0) {
-        return hh_base_url() . '/' . $path;
-    }
-    return hh_base_url() . hh_storage_web() . '/' . $path;
+    $path = preg_replace('#^storage/handhelds/#', '', $path);
+    return hh_base_url() . '/i/' . $path;
 }
 
 function hh_specs_table_html($specs, $locale = 'en')

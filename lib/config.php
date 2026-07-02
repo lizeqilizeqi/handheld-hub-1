@@ -62,6 +62,36 @@ function hh_storage_web()
     return rtrim((string) hh_config_get('storage.web_prefix', '/storage/handhelds'), '/');
 }
 
+/** Serve a file from storage/handhelds and exit (used by /i/ and legacy /storage routes). */
+function hh_serve_storage_file($relativePath)
+{
+    $relativePath = ltrim(str_replace('\\', '/', (string) $relativePath), '/');
+    $relativePath = preg_replace('#\.\.+#', '', $relativePath);
+    if ($relativePath === '') {
+        http_response_code(404);
+        echo 'Not found';
+        exit;
+    }
+    $file = hh_storage_fs() . '/' . $relativePath;
+    if (!is_file($file)) {
+        http_response_code(404);
+        echo 'Not found';
+        exit;
+    }
+    $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+    $types = array(
+        'jpg' => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        'webp' => 'image/webp',
+        'gif' => 'image/gif',
+    );
+    header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
+    header('Cache-Control: public, max-age=86400');
+    readfile($file);
+    exit;
+}
+
 /** Writable dir for scrape/translate job logs and pid files (not mixed with image assets). */
 function hh_app_logs_dir()
 {

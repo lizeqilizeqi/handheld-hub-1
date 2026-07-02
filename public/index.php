@@ -20,18 +20,12 @@ if ($uri === '/') {
     exit;
 }
 
+if (preg_match('#^/i/(.+)$#', $uri, $m)) {
+    hh_serve_storage_file($m[1]);
+}
+
 if (preg_match('#^/storage/handhelds/(.+)$#', $uri, $m)) {
-    $file = HH_STORAGE_FS . '/' . str_replace('..', '', $m[1]);
-    if (is_file($file)) {
-        $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-        $types = array('jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp', 'gif' => 'image/gif');
-        header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
-        readfile($file);
-        exit;
-    }
-    http_response_code(404);
-    echo 'Not found';
-    exit;
+    hh_serve_storage_file($m[1]);
 }
 
 if (preg_match('#^/(en|zh)/handhelds$#', $uri, $m)) {

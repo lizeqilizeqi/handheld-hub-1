@@ -150,7 +150,20 @@ return array(
     ),
 );
 PHP
-  chmod 640 "$cfg"
+  chmod 644 "$cfg"
+}
+
+hh_fix_app_permissions() {
+  log "修正文件权限（供 Docker www-data 读取）"
+  chmod 644 "${APP_DIR}/config.local.php" 2>/dev/null || true
+  if [[ -f "${APP_DIR}/config.secrets.php" ]]; then
+    chmod 644 "${APP_DIR}/config.secrets.php"
+  fi
+  mkdir -p "${APP_DIR}/storage/app/logs" "${APP_DIR}/storage/handhelds"
+  if id www-data >/dev/null 2>&1; then
+    chown -R www-data:www-data "${APP_DIR}/storage"
+  fi
+  chmod -R 775 "${APP_DIR}/storage/app/logs" 2>/dev/null || true
 }
 
 compose_up() {
@@ -201,9 +214,9 @@ main() {
   [[ -n "$REPO_URL" ]] && write_env_file
   PUBLIC_URL="$(detect_public_url)"
   ensure_config "$PUBLIC_URL"
-  mkdir -p "${APP_DIR}/storage/app/logs" "${APP_DIR}/storage/handhelds"
-  chmod -R 775 "${APP_DIR}/storage/app/logs" 2>/dev/null || true
+  hh_fix_app_permissions
   compose_up
+  hh_fix_app_permissions
   print_done "$PUBLIC_URL"
 }
 

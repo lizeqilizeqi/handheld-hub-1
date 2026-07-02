@@ -7,7 +7,7 @@ hh_admin_require_login();
 require_once __DIR__ . '/layout.php';
 
 $serverIp = isset($_GET['ip']) ? trim((string) $_GET['ip']) : '35.212.252.17';
-$repoUrl = isset($_GET['repo']) ? trim((string) $_GET['repo']) : '';
+$repoUrl = isset($_GET['repo']) ? trim((string) $_GET['repo']) : 'https://github.com/lizeqilizeqi/handheld-hub-1.git';
 $branch = isset($_GET['branch']) ? trim((string) $_GET['branch']) : 'main';
 $appDir = '/opt/handheld-hub';
 

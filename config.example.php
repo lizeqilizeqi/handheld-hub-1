@@ -8,6 +8,32 @@ return array(
         'base_url' => 'http://localhost:8080',
         'default_locale' => 'en',
         'timezone' => 'UTC',
+        'contact_email' => 'contact@oldman.dpdns.org',
+        'owner_name' => 'Handheld Hub',
+        'sites' => array(
+            'hub' => array(
+                'hosts' => array('www.oldmanhub.com', 'oldmanhub.com', 'localhost'),
+                'base_url' => 'https://www.oldmanhub.com',
+            ),
+            'handhelds' => array(
+                'hosts' => array('handhelds.oldmanhub.com', 'handhelds.localhost'),
+                'base_url' => 'https://handhelds.oldmanhub.com',
+            ),
+            'game' => array(
+                'hosts' => array('game.oldmanhub.com', 'game.localhost'),
+                'base_url' => 'https://game.oldmanhub.com',
+                'status' => 'soon',
+            ),
+            'news' => array(
+                'hosts' => array('news.oldmanhub.com', 'news.localhost'),
+                'base_url' => 'https://news.oldmanhub.com',
+                'status' => 'soon',
+            ),
+        ),
+        'legacy_hosts' => array(
+            'oldman.dpdns.org' => 'https://www.oldmanhub.com',
+            'www.oldman.dpdns.org' => 'https://www.oldmanhub.com',
+        ),
     ),
     'mysql' => array(
         'dsn' => 'mysql:host=127.0.0.1;port=3306;dbname=handheld_hub;charset=utf8mb4',
@@ -40,5 +66,8 @@ return array(
         'session_name' => 'HHADMINSESSID',
         'max_fail' => 5,
         'lock_seconds' => 900,
+    ),
+    'adsense' => array(
+        'client_id' => '',
     ),
 );

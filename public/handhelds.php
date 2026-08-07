@@ -34,9 +34,7 @@ $filters = array('status' => 'published', 'brand' => $brand, 'limit' => $perPage
 $list = hh_handheld_list($pdo, $filters);
 
 $brands = hh_brands($pdo);
-$brandLogos = hh_brand_logo_map($pdo, array_map(function ($row) {
-    return (string) $row['brand'];
-}, $list));
+$brandLogos = hh_public_brand_logos_for_list($pdo, $list);
 
 $rangeStart = $total > 0 ? (($page - 1) * $perPage) + 1 : 0;
 $rangeEnd = min($page * $perPage, $total);
@@ -58,15 +56,23 @@ function hh_public_handhelds_page_url($locale, $queryBase, $pageNum)
 
 
 $title = hh_public_page_title($locale, 'handhelds');
+$canonicalPath = $locale . '/handhelds';
+if ($page > 1 || $brand !== '') {
+    $canonicalParams = array();
+    if ($brand !== '') {
+        $canonicalParams['brand'] = $brand;
+    }
+    if ($page > 1) {
+        $canonicalParams['page'] = $page;
+    }
+    $canonicalPath .= '?' . http_build_query($canonicalParams);
+}
 
 hh_public_layout_start($locale, $title, array(
-
     'path' => 'handhelds',
-
-    'description' => $locale === 'zh' ? '按发布时间排序的掌机百科' : 'Handheld gaming devices sorted by release date',
-
-    'canonical' => hh_public_url($locale . '/handhelds'),
-
+    'description' => $locale === 'zh' ? '按发布时间排序的掌机百科，收录各品牌掌上游戏设备规格与参数。' : 'Handheld gaming devices sorted by release date — specs, brands, and portable console guides.',
+    'canonical' => hh_public_url($canonicalPath),
+    'og_type' => 'website',
 ));
 
 ?>
@@ -100,57 +106,8 @@ hh_public_layout_start($locale, $title, array(
 
 <div class="grid">
 
-  <?php foreach ($list as $h):
-
-    $name = hh_public_list_name($h);
-
-    $imgRow = hh_handheld_cover_image($pdo, (int) $h['id']);
-
-    $img = ($imgRow && !empty($imgRow['path'])) ? hh_image_public_url($imgRow['path']) : '';
-
-    $brandLogo = isset($brandLogos[$h['brand']]) ? $brandLogos[$h['brand']] : '';
-
-    $screenSize = trim((string) $h['screen_size']);
-
-    $screenRatio = trim((string) $h['screen_ratio']);
-
-  ?>
-
-  <article class="card">
-
-  <a class="card-link" href="/<?php echo hh_h($locale); ?>/handheld/<?php echo hh_h($h['slug']); ?>">
-
-    <?php if ($img): ?><figure class="card-media"><img src="<?php echo hh_h($img); ?>" alt="<?php echo hh_h($name); ?>" loading="lazy"></figure><?php endif; ?>
-
-    <div class="card-body">
-
-      <div class="card-title-row">
-        <?php if ($brandLogo): ?>
-        <img class="card-brand-logo" src="<?php echo hh_h($brandLogo); ?>" alt="<?php echo hh_h($h['brand']); ?>" loading="lazy">
-        <?php endif; ?>
-        <h3 class="card-title"><?php echo hh_h($name); ?></h3>
-      </div>
-
-      <div class="card-meta">
-        <?php if ($screenSize !== '' || $screenRatio !== ''): ?>
-        <div class="card-tags">
-          <?php if ($screenSize !== ''): ?><span class="card-tag"><?php echo hh_h($screenSize); ?></span><?php endif; ?>
-          <?php if ($screenRatio !== ''): ?><span class="card-tag"><?php echo hh_h($screenRatio); ?></span><?php endif; ?>
-        </div>
-        <?php endif; ?>
-        <?php if (!empty($h['release_date'])): ?>
-        <div class="card-tags card-tags-release">
-          <span class="card-tag"><?php echo hh_h(hh_public_ui($locale, 'release_date_label') . $h['release_date']); ?></span>
-        </div>
-        <?php endif; ?>
-      </div>
-
-    </div>
-
-  </a>
-
-  </article>
-
+  <?php foreach ($list as $h): ?>
+  <?php hh_public_render_handheld_card($pdo, $locale, $h, $brandLogos); ?>
   <?php endforeach; ?>
 
 </div>

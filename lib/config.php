@@ -137,6 +137,9 @@ function hh_base_url()
 
 function hh_public_url($path = '')
 {
+    if (function_exists('hh_site_public_url')) {
+        return hh_site_public_url($path);
+    }
     $base = hh_base_url();
     $path = ltrim((string) $path, '/');
     return $path === '' ? $base : $base . '/' . $path;

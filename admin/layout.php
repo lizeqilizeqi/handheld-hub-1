@@ -16,6 +16,7 @@ function hh_admin_layout_start($active = 'dashboard')
         'translate' => array('translate.php', 'translate'),
         'publish' => array('publish.php', 'publish'),
         'blogger' => array('blogger.php', 'blogger'),
+        'sites' => array('sites.php', 'sites'),
         'deploy' => array('deploy.php', 'deploy'),
     );
     foreach ($items as $key => $it) {

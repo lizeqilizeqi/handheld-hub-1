@@ -51,15 +51,11 @@ $bpEn = hh_blogger_post_row($pdo, (int) $h['id'], 'en');
 
 
 hh_public_layout_start($locale, $content['title'] ?? $name, array(
-
     'path' => 'handheld/' . $h['slug'],
-
     'description' => $content['meta_description'] ?? ($content['summary'] ?? $name),
-
     'canonical' => hh_public_url($locale . '/handheld/' . $h['slug']),
-
     'og_image' => $cover,
-
+    'og_type' => 'article',
 ));
 
 ?>

@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/bootstrap.php';
 require_once dirname(__DIR__) . '/handheld_repo.php';
 require_once __DIR__ . '/scraper_service.php';
+require_once __DIR__ . '/channel_scraper_service.php';
 
 function hh_scraper_log_path($jobId)
 {
@@ -55,13 +56,25 @@ function hh_scraper_recover_stale_jobs(PDO $pdo)
     }
 }
 
-function hh_scraper_spawn_background($jobId, $mode, $singleSlug = null)
+function hh_scraper_job_channel(PDO $pdo, $jobId)
+{
+    $job = hh_scrape_job_by_id($pdo, (int) $jobId);
+    if (!$job) {
+        return 'handheld';
+    }
+    $ch = isset($job['channel']) ? (string) $job['channel'] : 'handheld';
+    return in_array($ch, array('handheld', 'news', 'game'), true) ? $ch : 'handheld';
+}
+
+function hh_scraper_spawn_background($jobId, $mode, $singleSlug = null, $channel = 'handheld')
 {
     hh_ensure_writable_dir(hh_app_logs_dir());
     $log = hh_scraper_log_path($jobId);
     $pidFile = hh_scraper_pid_path($jobId);
     $php = hh_cli_php_binary();
     $script = HH_ROOT . '/bin/scrape.php';
+
+    $channel = in_array($channel, array('handheld', 'news', 'game'), true) ? $channel : 'handheld';
 
     $parts = array(
         'cd ' . escapeshellarg(HH_ROOT),
@@ -70,6 +83,7 @@ function hh_scraper_spawn_background($jobId, $mode, $singleSlug = null)
         escapeshellarg($script),
         '--job-id=' . (int) $jobId,
         '--mode=' . escapeshellarg($mode === 'full' ? 'full' : 'incremental'),
+        '--channel=' . escapeshellarg($channel),
     );
     if ($singleSlug !== null && $singleSlug !== '') {
         $parts[] = '--slug=' . escapeshellarg($singleSlug);
@@ -85,7 +99,7 @@ function hh_scraper_spawn_background($jobId, $mode, $singleSlug = null)
     return (int) $pid;
 }
 
-function hh_scraper_queue_job($mode, $singleSlug = null)
+function hh_scraper_queue_job($mode, $singleSlug = null, $channel = 'handheld', array $options = array())
 {
     $pdo = hh_pdo();
     hh_scraper_recover_stale_jobs($pdo);
@@ -95,9 +109,14 @@ function hh_scraper_queue_job($mode, $singleSlug = null)
         throw new RuntimeException('已有抓取任务 #' . (int) $running['id'] . ' 正在运行，请等待完成后再启动。');
     }
 
+    $channel = in_array($channel, array('handheld', 'news', 'game'), true) ? $channel : 'handheld';
+    if ($channel !== 'handheld' && $singleSlug !== null && $singleSlug !== '') {
+        throw new RuntimeException('资讯/游戏抓取不支持单条 slug 模式');
+    }
+
     $jobType = ($singleSlug !== null && $singleSlug !== '') ? 'single' : $mode;
-    $jobId = hh_scrape_job_create($pdo, $jobType);
-    hh_scraper_spawn_background($jobId, $mode, $singleSlug);
+    $jobId = hh_scrape_job_create($pdo, $jobType, $channel, $options);
+    hh_scraper_spawn_background($jobId, $mode, $singleSlug, $channel);
     return $jobId;
 }
 
@@ -120,14 +139,23 @@ function hh_scraper_execute_job($jobId, $mode = 'incremental', $singleSlug = nul
         @unlink(hh_scraper_pid_path($jobId));
     });
 
+    $channel = hh_scraper_job_channel($pdo, $jobId);
+    if ($channel === 'news') {
+        return (new HhNewsScraperService($pdo, $jobId))->run();
+    }
+    if ($channel === 'game') {
+        return (new HhGameScraperService($pdo, $jobId))->run();
+    }
+
     $svc = new HhScraperService($pdo, $jobId);
     return $svc->run($mode, $singleSlug);
 }
 
-function hh_scraper_run_job($mode = 'incremental', $singleSlug = null)
+function hh_scraper_run_job($mode = 'incremental', $singleSlug = null, $channel = 'handheld', array $options = array())
 {
     $pdo = hh_pdo();
-    $jobId = hh_scrape_job_create($pdo, $singleSlug ? 'single' : $mode);
+    $channel = in_array($channel, array('handheld', 'news', 'game'), true) ? $channel : 'handheld';
+    $jobId = hh_scrape_job_create($pdo, $singleSlug ? 'single' : $mode, $channel, $options);
     $stats = hh_scraper_execute_job($jobId, $mode, $singleSlug);
     return array('job_id' => $jobId, 'stats' => $stats);
 }

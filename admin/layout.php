@@ -12,11 +12,14 @@ function hh_admin_layout_start($active = 'dashboard')
     $items = array(
         'dashboard' => array('index.php', 'dashboard'),
         'handhelds' => array('handheld.php', 'handhelds'),
-        'scrape' => array('scrape.php', 'scrape'),
         'translate' => array('translate.php', 'translate'),
         'publish' => array('publish.php', 'publish'),
         'blogger' => array('blogger.php', 'blogger'),
         'sites' => array('sites.php', 'sites'),
+        'games' => array('games.php', 'games'),
+        'feeds' => array('feeds.php', 'feeds'),
+        'news_publish' => array('news_publish.php', 'news_publish'),
+        'scrape' => array('scrape.php', 'scrape'),
         'deploy' => array('deploy.php', 'deploy'),
     );
     foreach ($items as $key => $it) {

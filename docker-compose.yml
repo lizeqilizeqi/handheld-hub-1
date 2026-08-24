@@ -23,6 +23,7 @@ services:
       - "8080:80"
     volumes:
       - ./:/var/www/html
+      - ./deploy/apache-docker-dev.conf:/etc/apache2/sites-available/000-default.conf:ro
     working_dir: /var/www/html
     depends_on:
       db:
@@ -30,8 +31,7 @@ services:
     command: >
       bash -c "docker-php-ext-install pdo pdo_mysql &&
       a2enmod rewrite &&
-      sed -i 's!/var/www/html!/var/www/html/public!g' /etc/apache2/sites-available/000-default.conf &&
-      printf '%s\n' 'Alias /admin /var/www/html/admin' 'Alias /storage/handhelds /var/www/html/storage/handhelds' >> /etc/apache2/apache2.conf &&
+      grep -q 'Alias /admin' /etc/apache2/apache2.conf || printf '%s\n' 'Alias /admin /var/www/html/admin' 'Alias /storage/handhelds /var/www/html/storage/handhelds' >> /etc/apache2/apache2.conf &&
       mkdir -p /var/www/html/storage/app/logs /var/www/html/storage/handhelds &&
       chown -R www-data:www-data /var/www/html/storage &&
       chmod -R 775 /var/www/html/storage/app/logs &&

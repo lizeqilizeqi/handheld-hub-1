@@ -1,5 +1,5 @@
 #!/bin/bash
-# Self-contained GCP startup: import bundle + restart (no GitHub dependency)
+# Self-contained GCP startup: import bundle + fix images + restart (root)
 set -uo pipefail
 
 APP_DIR="/opt/handheld-hub"
@@ -25,76 +25,88 @@ copy_log() {
   done
 }
 
-BUNDLE="$(find_bundle || true)"
-if [[ -z "$BUNDLE" ]]; then
-  echo "no bundle, skip import"
-  copy_log
-  exit 0
-fi
+fix_storage_perms() {
+  local dir="$APP_DIR/storage/handhelds"
+  [[ -d "$dir" ]] || return 0
+  find "$dir" -type d -exec chmod 755 {} + 2>/dev/null || true
+  find "$dir" -type f -exec chmod 644 {} + 2>/dev/null || true
+  chown -R www-data:www-data "$APP_DIR/storage" 2>/dev/null || true
+  echo "image files on disk: $(find "$dir" -type f ! -name '.gitkeep' | wc -l)"
+}
 
-if [[ -f "${BUNDLE}.imported" ]]; then
-  echo "already imported: ${BUNDLE}.imported"
-  copy_log
-  exit 0
-fi
+fix_apache_images() {
+  cd "$APP_DIR"
+  docker compose -f "$COMPOSE" exec -T web bash -c '
+if ! grep -q "Directory /var/www/html/storage/handhelds" /etc/apache2/apache2.conf; then
+  cat >> /etc/apache2/apache2.conf <<EOF
 
-[[ -d "$APP_DIR" ]] || { echo "missing $APP_DIR"; copy_log; exit 1; }
-
-WORK="/tmp/hh-import-$$"
-mkdir -p "$WORK"
-tar -xzf "$BUNDLE" -C "$WORK"
-
-ROOT="$WORK"
-[[ -d "$WORK/hh-migration-bundle" ]] && ROOT="$WORK/hh-migration-bundle"
-
-for f in database.sql config.local.php config.secrets.php; do
-  [[ -f "$ROOT/$f" ]] || { echo "bundle missing $f"; rm -rf "$WORK"; copy_log; exit 1; }
-done
-
-echo "write configs"
-cp "$ROOT/config.local.php" "$APP_DIR/config.local.php"
-cp "$ROOT/config.secrets.php" "$APP_DIR/config.secrets.php"
-chmod 644 "$APP_DIR/config.local.php" "$APP_DIR/config.secrets.php"
-
-mkdir -p "$APP_DIR/storage/handhelds" "$APP_DIR/storage/app/logs"
-if [[ -f "$ROOT/storage-handhelds.tar.gz" ]]; then
-  echo "restore images"
-  tar -xzf "$ROOT/storage-handhelds.tar.gz" -C "$APP_DIR/storage/handhelds"
-fi
-chown -R www-data:www-data "$APP_DIR/storage" 2>/dev/null || true
-
-cd "$APP_DIR"
-docker compose -f "$COMPOSE" up -d
-
-echo "wait mysql"
-for i in $(seq 1 90); do
-  docker compose -f "$COMPOSE" exec -T db mysqladmin ping -h localhost -u handheld -phandheld --silent 2>/dev/null && break
-  sleep 2
-done
-
-SQL="$WORK/database-clean.sql"
-sed '1s/^\xEF\xBB\xBF//; /^mysqldump:/d; /^mysql: \[Warning\]/d' "$ROOT/database.sql" > "$SQL"
-
-echo "sql first line: $(head -1 "$SQL")"
-case "$(head -1 "$SQL")" in
-  --*) echo "sql header ok" ;;
-  *) echo "ERROR bad sql header"; rm -rf "$WORK"; copy_log; exit 1 ;;
-esac
-
-echo "import database via docker cp"
-docker compose -f "$COMPOSE" cp "$SQL" db:/tmp/hh-import.sql
-if docker compose -f "$COMPOSE" exec -T db sh -c 'mysql -u handheld -phandheld handheld_hub < /tmp/hh-import.sql'; then
-  echo "import ok"
-  touch "${BUNDLE}.imported"
+<Directory /var/www/html/storage/handhelds>
+    Options -Indexes
+    Require all granted
+</Directory>
+EOF
+  apache2ctl graceful
+  echo "apache storage directory granted"
 else
-  echo "import failed"
+  echo "apache storage directory already ok"
+fi
+ls -la /var/www/html/storage/handhelds/rg-rotate/cover.webp 2>/dev/null || echo "sample image missing in container"
+' 2>/dev/null || true
+}
+
+BUNDLE="$(find_bundle || true)"
+if [[ -n "$BUNDLE" && ! -f "${BUNDLE}.imported" && -d "$APP_DIR" ]]; then
+  WORK="/tmp/hh-import-$$"
+  mkdir -p "$WORK"
+  tar -xzf "$BUNDLE" -C "$WORK"
+  ROOT="$WORK"
+  [[ -d "$WORK/hh-migration-bundle" ]] && ROOT="$WORK/hh-migration-bundle"
+
+  if [[ -f "$ROOT/config.local.php" && -f "$ROOT/config.secrets.php" && -f "$ROOT/database.sql" ]]; then
+    cp "$ROOT/config.local.php" "$APP_DIR/config.local.php"
+    cp "$ROOT/config.secrets.php" "$APP_DIR/config.secrets.php"
+    chmod 644 "$APP_DIR/config.local.php" "$APP_DIR/config.secrets.php"
+    mkdir -p "$APP_DIR/storage/handhelds" "$APP_DIR/storage/app/logs"
+    if [[ -f "$ROOT/storage-handhelds.tar.gz" ]]; then
+      tar -xzf "$ROOT/storage-handhelds.tar.gz" -C "$APP_DIR/storage/handhelds"
+    fi
+    fix_storage_perms
+
+    cd "$APP_DIR"
+    docker compose -f "$COMPOSE" up -d
+    for i in $(seq 1 90); do
+      docker compose -f "$COMPOSE" exec -T db mysqladmin ping -h localhost -u handheld -phandheld --silent 2>/dev/null && break
+      sleep 2
+    done
+
+    SQL="$WORK/database-clean.sql"
+    sed '1s/^\xEF\xBB\xBF//; /^mysqldump:/d; /^mysql: \[Warning\]/d' "$ROOT/database.sql" > "$SQL"
+    docker compose -f "$COMPOSE" cp "$SQL" db:/tmp/hh-import.sql
+    if docker compose -f "$COMPOSE" exec -T db sh -c 'mysql -u handheld -phandheld handheld_hub < /tmp/hh-import.sql'; then
+      touch "${BUNDLE}.imported"
+      echo "import ok"
+    else
+      echo "import failed"
+    fi
+    docker compose -f "$COMPOSE" exec -T web php bin/migrate.php 2>/dev/null || true
+  fi
+  rm -rf "$WORK"
+elif [[ -f "${BUNDLE}.imported" ]]; then
+  echo "bundle already imported, fixing images/apache only"
+  fix_storage_perms
 fi
 
-docker compose -f "$COMPOSE" exec -T web php bin/migrate.php 2>/dev/null || true
-chmod 644 "$APP_DIR/config.local.php" "$APP_DIR/config.secrets.php" 2>/dev/null || true
-chown -R www-data:www-data "$APP_DIR/storage" 2>/dev/null || true
-docker compose -f "$COMPOSE" up -d --build
+if [[ -f "$APP_DIR/config.local.php" ]]; then
+  sed -i 's|http://localhost:8080|http://oldman.dpdns.org|g' "$APP_DIR/config.local.php" 2>/dev/null || true
+  sed -i 's|http://35.212.252.17|http://oldman.dpdns.org|g' "$APP_DIR/config.local.php" 2>/dev/null || true
+fi
 
-rm -rf "$WORK"
+if command -v docker >/dev/null 2>&1 && [[ -d "$APP_DIR" ]]; then
+  cd "$APP_DIR"
+  docker compose -f "$COMPOSE" up -d --build
+  fix_apache_images
+  fix_storage_perms
+fi
+
 echo "=== hh startup end $(date -Is) ==="
 copy_log

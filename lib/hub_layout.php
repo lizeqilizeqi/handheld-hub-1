@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/lib/public_layout.php';
 require_once dirname(__DIR__) . '/lib/site_context.php';
+require_once dirname(__DIR__) . '/lib/site_repo.php';
 
 function hh_hub_ui($locale, $key)
 {
@@ -21,7 +22,7 @@ function hh_hub_ui($locale, $key)
             'section_games_title' => 'Retro games',
             'section_games_desc' => 'Classic titles, platforms, and nostalgia — directory coming soon.',
             'section_news_title' => 'News & picks',
-            'section_news_desc' => 'Aggregated reads for hardware, indie retro, and culture.',
+            'section_news_desc' => 'Original articles and editorials from Old Man Hub.',
             'badge_live' => 'Live',
             'badge_soon' => 'Coming soon',
             'cta_enter' => 'Enter',
@@ -48,7 +49,7 @@ function hh_hub_ui($locale, $key)
             'section_games_title' => '怀旧游戏',
             'section_games_desc' => '经典平台与游戏目录筹备中，先做合规资料与外链聚合。',
             'section_news_title' => '资讯精选',
-            'section_news_desc' => '硬件、独立复古与文化向内容聚合，后台抓取接入中。',
+            'section_news_desc' => '本站原创资讯与掌机圈短文，Editor 后台发布。',
             'badge_live' => '已上线',
             'badge_soon' => '筹备中',
             'cta_enter' => '进入',
@@ -87,6 +88,7 @@ function hh_hub_layout_start($locale, $title, $meta = array())
     $ogType = !empty($meta['og_type']) ? (string) $meta['og_type'] : 'website';
 
     echo '<!DOCTYPE html><html lang="' . hh_h($locale) . '"><head><meta charset="utf-8">';
+    echo '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">';
     echo '<meta name="viewport" content="width=device-width,initial-scale=1">';
     echo '<title>' . hh_h($title) . ' · ' . hh_h($uiSite) . '</title>';
     if ($description !== '') {
@@ -122,12 +124,22 @@ function hh_hub_layout_start($locale, $title, $meta = array())
     }
 
     echo '</head><body class="hub-site">';
+    $pdo = hh_pdo();
+    $hubModules = hh_hub_modules_visible_map($pdo);
     $handheldsHome = hh_site_public_url($locale, 'handhelds');
     echo '<header class="site-header"><div class="wrap header-inner">';
     echo '<a class="logo" href="/' . hh_h($locale) . '">' . hh_h($uiSite) . '</a>';
     echo '<nav class="site-nav" aria-label="Main">';
     echo '<a href="/' . hh_h($locale) . '">' . hh_h(hh_hub_ui($locale, 'nav_home')) . '</a>';
-    echo '<a href="' . hh_h($handheldsHome) . '">' . hh_h(hh_hub_ui($locale, 'nav_handhelds')) . '</a>';
+    if (!empty($hubModules['handhelds'])) {
+        echo '<a href="' . hh_h($handheldsHome) . '">' . hh_h(hh_hub_ui($locale, 'nav_handhelds')) . '</a>';
+    }
+    if (!empty($hubModules['game'])) {
+        echo '<a href="' . hh_h(hh_site_public_url($locale, 'game')) . '">' . hh_h(hh_hub_ui($locale, 'nav_games')) . '</a>';
+    }
+    if (!empty($hubModules['news'])) {
+        echo '<a href="' . hh_h(hh_site_public_url($locale, 'news')) . '">' . hh_h(hh_hub_ui($locale, 'nav_news')) . '</a>';
+    }
     echo '<a href="/' . hh_h($locale) . '/about">' . hh_h(hh_hub_ui($locale, 'nav_about')) . '</a>';
     echo '<a href="/' . hh_h($locale) . '/contact">' . hh_h(hh_hub_ui($locale, 'nav_contact')) . '</a>';
     echo hh_public_lang_switch_html($locale, $switchPath, $switchQuery);

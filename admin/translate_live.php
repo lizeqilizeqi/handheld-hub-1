@@ -28,10 +28,8 @@ foreach ($logs as $row) {
 
 $total = max(1, (int) $job['total_count']);
 $current = (int) $job['current_index'];
-$percent = min(100, (int) round($current / $total * 100));
-if ($job['status'] === 'done') {
-    $percent = 100;
-}
+$done = (int) $job['ok_count'] + (int) $job['fail_count'];
+$percent = $job['status'] === 'done' ? 100 : min(99, (int) round(max($current, $done) / $total * 100));
 
 hh_json_response(array(
     'ok' => true,

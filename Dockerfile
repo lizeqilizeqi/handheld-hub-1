@@ -10,12 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN sed -i 's!/var/www/html!/var/www/html/public!g' /etc/apache2/sites-available/000-default.conf \
     && printf '%s\n' \
         'Alias /admin /var/www/html/admin' \
-        'Alias /storage/handhelds /var/www/html/storage/handhelds' \
         '<Directory /var/www/html/admin>' \
-        '    Require all granted' \
-        '</Directory>' \
-        '<Directory /var/www/html/storage/handhelds>' \
-        '    Options -Indexes' \
         '    Require all granted' \
         '</Directory>' \
         >> /etc/apache2/apache2.conf

@@ -19,6 +19,8 @@ $title = $locale === 'zh' ? '首页' : 'Home';
 $desc = hh_hub_ui($locale, 'tagline');
 $handheldsBase = hh_site_public_url('', 'handhelds');
 $hubSections = hh_hub_sections_for_home($pdo, $locale);
+$hubModules = hh_hub_modules_visible_map($pdo);
+$sectionCount = count($hubSections);
 
 hh_hub_layout_start($locale, $title, array(
     'path' => '',
@@ -46,7 +48,7 @@ hh_hub_layout_start($locale, $title, array(
   <p class="home-lead"><?php echo hh_h(hh_hub_ui($locale, 'tagline')); ?></p>
 </section>
 
-<section class="hub-sections" aria-label="<?php echo $locale === 'zh' ? '站点板块' : 'Hub sections'; ?>">
+<section class="hub-sections hub-sections--count-<?php echo max(1, min(3, $sectionCount)); ?>" aria-label="<?php echo $locale === 'zh' ? '站点板块' : 'Hub sections'; ?>">
   <?php foreach ($hubSections as $sec): ?>
   <?php
     $isLive = ($sec['badge'] === 'live');
@@ -75,7 +77,7 @@ hh_hub_layout_start($locale, $title, array(
   <?php endforeach; ?>
 </section>
 
-<?php if ($recent): ?>
+<?php if ($recent && !empty($hubModules['handhelds'])): ?>
 <section class="home-recent hub-handhelds-preview">
   <h2><?php echo hh_h(hh_hub_ui($locale, 'handhelds_latest')); ?></h2>
   <div class="grid home-grid">

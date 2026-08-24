@@ -3,6 +3,7 @@
 require_once __DIR__ . '/public_layout.php';
 require_once __DIR__ . '/vertical_ui.php';
 require_once __DIR__ . '/site_context.php';
+require_once __DIR__ . '/hub_layout.php';
 
 function hh_vertical_layout_start($siteCode, $locale, $title, $meta = array())
 {
@@ -24,14 +25,16 @@ function hh_vertical_layout_start($siteCode, $locale, $title, $meta = array())
     $description = !empty($meta['description']) ? (string) $meta['description'] : '';
     $ogImage = !empty($meta['og_image']) ? (string) $meta['og_image'] : hh_site_public_url('assets/og-default.svg', $siteCode);
     $ogType = !empty($meta['og_type']) ? (string) $meta['og_type'] : 'website';
+    $robots = !empty($meta['robots']) ? (string) $meta['robots'] : 'noindex,follow';
 
     echo '<!DOCTYPE html><html lang="' . hh_h($locale) . '"><head><meta charset="utf-8">';
+    echo '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">';
     echo '<meta name="viewport" content="width=device-width,initial-scale=1">';
     echo '<title>' . hh_h($title) . ' · ' . hh_h($uiSite) . '</title>';
     if ($description !== '') {
         echo '<meta name="description" content="' . hh_h($description) . '">';
     }
-    echo '<meta name="robots" content="index,follow">';
+    echo '<meta name="robots" content="' . hh_h($robots) . '">';
     if ($canonical !== '') {
         echo '<link rel="canonical" href="' . hh_h($canonical) . '">';
     }
@@ -54,16 +57,24 @@ function hh_vertical_layout_start($siteCode, $locale, $title, $meta = array())
     echo '<meta property="og:image" content="' . hh_h($ogImage) . '">';
     echo '<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">';
     echo '<link rel="stylesheet" href="/assets/style.css?v=' . (int) @filemtime(dirname(__DIR__) . '/public/assets/style.css') . '">';
-    echo '</head><body>';
+    echo '</head><body class="vertical-site vertical-' . hh_h($siteCode) . '">';
 
     $hubHome = hh_site_public_url($locale, 'hub');
-    echo '<header class="site-header"><div class="wrap header-inner">';
-    echo '<a class="logo" href="/' . hh_h($locale) . '">' . hh_h($uiSite) . '</a>';
+    $hubBrand = hh_hub_ui($locale, 'site_name');
+    $handheldsHome = hh_site_public_url($locale, 'handhelds');
+    echo '<header class="site-header vertical-header"><div class="wrap header-inner">';
+    echo '<a class="logo" href="' . hh_h($hubHome) . '">' . hh_h($hubBrand) . '</a>';
     echo '<nav class="site-nav" aria-label="Main">';
-    echo '<a href="' . hh_h($hubHome) . '">' . hh_h(hh_vertical_ui($siteCode, $locale, 'back_hub')) . '</a>';
-    echo '<a href="/' . hh_h($locale) . '">' . hh_h($locale === 'zh' ? '首页' : 'Home') . '</a>';
+    echo '<a href="' . hh_h($handheldsHome) . '">' . hh_h(hh_vertical_ui($siteCode, $locale, 'nav_handhelds')) . '</a>';
+    echo '<a href="/' . hh_h($locale) . '">' . hh_h($locale === 'zh' ? '本栏首页' : 'Section home') . '</a>';
+    if ($siteCode === 'game') {
+        echo '<a href="/' . hh_h($locale) . '/games">' . hh_h($locale === 'zh' ? '目录' : 'Catalog') . '</a>';
+    }
+    if ($siteCode === 'news') {
+        echo '<a href="/' . hh_h($locale) . '/news">' . hh_h($locale === 'zh' ? '资讯' : 'News') . '</a>';
+    }
     echo hh_public_lang_switch_html($locale, $switchPath, $switchQuery);
-    echo '</nav></div></header><main class="wrap">';
+    echo '</nav></div></header><main class="wrap vertical-main">';
 }
 
 function hh_vertical_layout_end($siteCode, $locale = 'en')
@@ -72,11 +83,12 @@ function hh_vertical_layout_end($siteCode, $locale = 'en')
     $year = date('Y');
     $uiSite = hh_vertical_ui($siteCode, $locale, 'site_name');
     echo '</main>';
-    echo '<footer class="site-footer"><div class="wrap footer-inner">';
-    echo '<p class="footer-tagline">' . hh_h(hh_vertical_ui($siteCode, $locale, 'tagline')) . '</p>';
-    echo '<p class="footer-copy">© ' . (int) $year . ' ' . hh_h($uiSite) . ' · ';
-    echo '<a href="' . hh_h(hh_site_public_url($locale, 'hub')) . '">Old Man Hub</a></p>';
-    echo '</div></footer>';
-    echo '<script src="/assets/site.js?v=' . (int) @filemtime(dirname(__DIR__) . '/public/assets/site.js') . '" defer></script>';
-    echo '</body></html>';
+    echo '<footer class="site-footer vertical-footer"><div class="wrap footer-inner">';
+    echo '<nav class="footer-nav" aria-label="Footer">';
+    echo '<a href="' . hh_h(hh_site_public_url($locale, 'hub')) . '">' . hh_h($locale === 'zh' ? '老男人 Hub' : 'Oldman Hub') . '</a>';
+    echo '<a href="' . hh_h(hh_site_public_url($locale, 'handhelds')) . '">' . hh_h(hh_vertical_ui($siteCode, $locale, 'nav_handhelds')) . '</a>';
+    echo '</nav>';
+    echo '<p>' . hh_h(hh_vertical_ui($siteCode, $locale, 'footer_note')) . '</p>';
+    echo '<p class="footer-copy">© ' . (int) $year . ' Handheld Hub' . ($locale === 'zh' ? '。保留所有权利。' : '. All rights reserved.') . '</p>';
+    echo '</div></footer></body></html>';
 }

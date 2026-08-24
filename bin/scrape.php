@@ -13,6 +13,8 @@ hh_bootstrap();
 $mode = 'incremental';
 $slug = null;
 $jobId = 0;
+$channel = 'handheld';
+$since = '';
 foreach ($argv as $arg) {
     if (strpos($arg, '--mode=') === 0) {
         $mode = substr($arg, 7);
@@ -20,7 +22,15 @@ foreach ($argv as $arg) {
         $slug = substr($arg, 7);
     } elseif (strpos($arg, '--job-id=') === 0) {
         $jobId = (int) substr($arg, 9);
+    } elseif (strpos($arg, '--channel=') === 0) {
+        $channel = substr($arg, 10);
+    } elseif (strpos($arg, '--since=') === 0) {
+        $since = substr($arg, 8);
     }
+}
+$scrapeOptions = array();
+if ($channel === 'news' && !empty($since) && preg_match('#^\d{4}-\d{2}-\d{2}$#', $since)) {
+    $scrapeOptions['since'] = $since;
 }
 
 try {
@@ -28,7 +38,7 @@ try {
         $stats = hh_scraper_execute_job($jobId, $mode === 'full' ? 'full' : 'incremental', $slug);
         echo "Job #{$jobId} done\n";
     } else {
-        $result = hh_scraper_run_job($mode === 'full' ? 'full' : 'incremental', $slug);
+        $result = hh_scraper_run_job($mode === 'full' ? 'full' : 'incremental', $slug, $channel, $scrapeOptions);
         $jobId = $result['job_id'];
         $stats = $result['stats'];
         echo "Job #{$jobId} done\n";

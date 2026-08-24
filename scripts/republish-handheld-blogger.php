@@ -13,8 +13,8 @@ if ($id <= 0) {
 }
 
 try {
-    $posts = hh_blogger_publish_locales($pdo, $id, array('zh', 'en'), array(
-        'labels' => array('handheld', 'gaming'),
+    $posts = hh_blogger_publish_locales($pdo, $id, hh_blogger_publish_locales_default(), array(
+        'labels' => array('handheld', 'gaming', 'english'),
     ));
     foreach ($posts as $loc => $post) {
         echo $loc . ': ' . ($post['url'] ?? $post['id']) . "\n";

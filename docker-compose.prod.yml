@@ -1,4 +1,4 @@
-# Production stack for Ubuntu / GCP (e2-micro friendly).
+# Production stack — web on localhost:8080; host Caddy serves HTTPS on 443.
 services:
   db:
     image: mysql:8.0
@@ -24,7 +24,7 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "127.0.0.1:8080:80"
     volumes:
       - ./:/var/www/html
     working_dir: /var/www/html

@@ -574,6 +574,12 @@ function hh_handheld_cover_image_from_list($images)
     return count($images) > 0 ? $images[0] : null;
 }
 
+/** Locales published to Blogger (English-only blog). */
+function hh_blogger_publish_locales_default()
+{
+    return array('en');
+}
+
 function hh_blogger_validate_content_for_publish(PDO $pdo, $handheldId, $locale)
 {
     $locale = in_array($locale, array('en', 'zh'), true) ? $locale : 'en';
@@ -724,34 +730,42 @@ function hh_blogger_create_or_update_post(PDO $pdo, $handheldId, $locale = 'en',
 /**
  * @return array|null decoded JSON on 2xx, null on 404
  */
-function hh_blogger_api_request($method, $url, $token, array $payload)
+function hh_blogger_api_request($method, $url, $token, array $payload, $maxRetries = 5)
 {
-    $ch = curl_init($url);
-    curl_setopt_array($ch, array(
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CUSTOMREQUEST => $method,
-        CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
-        CURLOPT_HTTPHEADER => array(
-            'Authorization: Bearer ' . $token,
-            'Content-Type: application/json',
-        ),
-        CURLOPT_TIMEOUT => 120,
-    ));
-    $body = curl_exec($ch);
-    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+    $attempt = 0;
+    while (true) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, array(
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CUSTOMREQUEST => $method,
+            CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
+            CURLOPT_HTTPHEADER => array(
+                'Authorization: Bearer ' . $token,
+                'Content-Type: application/json',
+            ),
+            CURLOPT_TIMEOUT => 120,
+        ));
+        $body = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
 
-    if ($body === false) {
-        throw new RuntimeException('Blogger API request failed');
+        if ($body === false) {
+            throw new RuntimeException('Blogger API request failed');
+        }
+        if ($code === 404) {
+            return null;
+        }
+        if ($code === 429 && $attempt < $maxRetries) {
+            usleep(min(60000000, 500000 * (2 ** $attempt));
+            $attempt++;
+            continue;
+        }
+        if ($code < 200 || $code >= 300) {
+            throw new RuntimeException('Blogger API HTTP ' . $code . ': ' . mb_substr((string) $body, 0, 500));
+        }
+        $json = json_decode((string) $body, true);
+        return is_array($json) ? $json : null;
     }
-    if ($code === 404) {
-        return null;
-    }
-    if ($code < 200 || $code >= 300) {
-        throw new RuntimeException('Blogger API HTTP ' . $code . ': ' . mb_substr((string) $body, 0, 500));
-    }
-    $json = json_decode((string) $body, true);
-    return is_array($json) ? $json : null;
 }
 
 function hh_blogger_publish_post(PDO $pdo, $postId, $publishDate = null)
@@ -797,7 +811,6 @@ function hh_blogger_ready_where_sql()
 {
     return array(
         "h.status = 'published'",
-        "TRIM(COALESCE(cz.body_html, '')) <> ''",
         "TRIM(COALESCE(ce.body_html, '')) <> ''",
     );
 }
@@ -818,11 +831,26 @@ function hh_blogger_ready_handheld_ids(PDO $pdo, $bloggerFilter = 'all')
     $where = hh_blogger_list_where_sql($bloggerFilter);
     $sql = 'SELECT h.id
         FROM hh_handhelds h
-        INNER JOIN hh_handheld_content cz ON cz.handheld_id = h.id AND cz.locale = \'zh\'
         INNER JOIN hh_handheld_content ce ON ce.handheld_id = h.id AND ce.locale = \'en\'
         WHERE ' . implode(' AND ', $where) . '
-        ORDER BY h.release_date DESC, h.id DESC';
+        ORDER BY h.release_date ASC, h.id ASC';
     $st = $pdo->query($sql);
+    return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+}
+
+/** Oldest release_date first so Blogger feed shows newest handhelds on top. */
+function hh_blogger_sort_handheld_ids_for_publish(PDO $pdo, array $ids)
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), function ($v) {
+        return $v > 0;
+    })));
+    if ($ids === array()) {
+        return array();
+    }
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $sql = 'SELECT id FROM hh_handhelds WHERE id IN (' . $placeholders . ') ORDER BY release_date ASC, id ASC';
+    $st = $pdo->prepare($sql);
+    $st->execute($ids);
     return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
 }
 
@@ -831,7 +859,6 @@ function hh_blogger_ready_count(PDO $pdo)
     $where = hh_blogger_ready_where_sql();
     $sql = 'SELECT COUNT(*)
         FROM hh_handhelds h
-        INNER JOIN hh_handheld_content cz ON cz.handheld_id = h.id AND cz.locale = \'zh\'
         INNER JOIN hh_handheld_content ce ON ce.handheld_id = h.id AND ce.locale = \'en\'
         WHERE ' . implode(' AND ', $where);
     return (int) $pdo->query($sql)->fetchColumn();
@@ -842,7 +869,6 @@ function hh_blogger_pending_count(PDO $pdo)
     $where = hh_blogger_list_where_sql('pending');
     $sql = 'SELECT COUNT(*)
         FROM hh_handhelds h
-        INNER JOIN hh_handheld_content cz ON cz.handheld_id = h.id AND cz.locale = \'zh\'
         INNER JOIN hh_handheld_content ce ON ce.handheld_id = h.id AND ce.locale = \'en\'
         WHERE ' . implode(' AND ', $where);
     return (int) $pdo->query($sql)->fetchColumn();
@@ -853,7 +879,6 @@ function hh_blogger_published_mark_count(PDO $pdo)
     $where = hh_blogger_list_where_sql('published');
     $sql = 'SELECT COUNT(*)
         FROM hh_handhelds h
-        INNER JOIN hh_handheld_content cz ON cz.handheld_id = h.id AND cz.locale = \'zh\'
         INNER JOIN hh_handheld_content ce ON ce.handheld_id = h.id AND ce.locale = \'en\'
         WHERE ' . implode(' AND ', $where);
     return (int) $pdo->query($sql)->fetchColumn();
@@ -876,9 +901,8 @@ function hh_blogger_mark_reset(PDO $pdo, $handheldId)
 
 function hh_blogger_try_mark_handheld_published(PDO $pdo, $handheldId)
 {
-    $bpZ = hh_blogger_post_row($pdo, (int) $handheldId, 'zh');
     $bpE = hh_blogger_post_row($pdo, (int) $handheldId, 'en');
-    if ($bpZ && ($bpZ['sync_status'] ?? '') === 'published' && $bpE && ($bpE['sync_status'] ?? '') === 'published') {
+    if ($bpE && ($bpE['sync_status'] ?? '') === 'published') {
         hh_blogger_mark_published($pdo, (int) $handheldId);
     }
 }
@@ -888,16 +912,14 @@ function hh_blogger_try_mark_handheld_published(PDO $pdo, $handheldId)
  */
 function hh_blogger_publish_batch(PDO $pdo, array $ids, $options = array())
 {
-    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), function ($v) {
-        return $v > 0;
-    })));
+    $ids = hh_blogger_sort_handheld_ids_for_publish($pdo, $ids);
     $ok = 0;
     $fail = 0;
     $errors = array();
 
     foreach ($ids as $id) {
         try {
-            hh_blogger_publish_locales($pdo, $id, array('zh', 'en'), $options);
+            hh_blogger_publish_locales($pdo, $id, hh_blogger_publish_locales_default(), $options);
             $ok++;
         } catch (Throwable $e) {
             $fail++;

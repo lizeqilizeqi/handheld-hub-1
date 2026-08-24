@@ -286,7 +286,7 @@ function hh_image_public_url($path)
 {
     $path = ltrim(str_replace('\\', '/', (string) $path), '/');
     $path = preg_replace('#^storage/handhelds/#', '', $path);
-    return hh_base_url() . '/img.php?f=' . rawurlencode($path);
+    return hh_storage_web() . '/' . $path;
 }
 
 function hh_specs_table_html($specs, $locale = 'en')
@@ -306,11 +306,33 @@ function hh_specs_table_html($specs, $locale = 'en')
     return $html;
 }
 
-function hh_scrape_job_create(PDO $pdo, $type)
+function hh_scrape_job_create(PDO $pdo, $type, $channel = 'handheld', array $options = array())
 {
-    $pdo->prepare('INSERT INTO hh_scrape_jobs (job_type, status, started_at) VALUES (?, "running", NOW())')
-        ->execute(array((string) $type));
+    $channel = in_array($channel, array('handheld', 'news', 'game'), true) ? $channel : 'handheld';
+    $optionsJson = $options === array() ? null : json_encode($options, JSON_UNESCAPED_UNICODE);
+    try {
+        $pdo->prepare('INSERT INTO hh_scrape_jobs (job_type, channel, status, started_at, options_json) VALUES (?, ?, "running", NOW(), ?)')
+            ->execute(array((string) $type, $channel, $optionsJson));
+    } catch (Throwable $e) {
+        try {
+            $pdo->prepare('INSERT INTO hh_scrape_jobs (job_type, channel, status, started_at) VALUES (?, ?, "running", NOW())')
+                ->execute(array((string) $type, $channel));
+        } catch (Throwable $e2) {
+            $pdo->prepare('INSERT INTO hh_scrape_jobs (job_type, status, started_at) VALUES (?, "running", NOW())')
+                ->execute(array((string) $type));
+        }
+    }
     return (int) $pdo->lastInsertId();
+}
+
+function hh_scrape_job_options(PDO $pdo, $jobId)
+{
+    $job = hh_scrape_job_by_id($pdo, (int) $jobId);
+    if (!$job || empty($job['options_json'])) {
+        return array();
+    }
+    $decoded = json_decode((string) $job['options_json'], true);
+    return is_array($decoded) ? $decoded : array();
 }
 
 function hh_scrape_job_update_progress(PDO $pdo, $jobId, $fields)
@@ -350,8 +372,10 @@ function hh_scrape_job_finish(PDO $pdo, $jobId, $fields)
 
 function hh_scrape_log(PDO $pdo, $jobId, $level, $slug, $message)
 {
+    $allowed = array('info', 'warn', 'error', 'fetch', 'ok', 'skip');
+    $level = in_array($level, $allowed, true) ? $level : 'info';
     $pdo->prepare('INSERT INTO hh_scrape_logs (job_id, level, slug, message) VALUES (?,?,?,?)')
-        ->execute(array($jobId ? (int) $jobId : null, (string) $level, (string) $slug, (string) $message));
+        ->execute(array($jobId ? (int) $jobId : null, $level, (string) $slug, (string) $message));
 }
 
 function hh_scrape_logs_poll(PDO $pdo, $jobId, $afterId = 0, $limit = 120)

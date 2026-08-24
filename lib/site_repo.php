@@ -87,6 +87,77 @@ function hh_hub_sections_list(PDO $pdo = null)
     return $st->fetchAll(PDO::FETCH_ASSOC);
 }
 
+/** @return array<string, bool> site_code => visible on hub home + hub nav */
+function hh_hub_modules_visible_map(PDO $pdo)
+{
+    $defaults = array('handhelds' => true, 'game' => true, 'news' => true);
+    if (!hh_sites_table_exists($pdo)) {
+        return $defaults;
+    }
+    try {
+        $st = $pdo->query('SELECT site_code, is_visible FROM hh_hub_sections');
+    } catch (Throwable $e) {
+        return $defaults;
+    }
+    $map = $defaults;
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $code = (string) $row['site_code'];
+        if (isset($map[$code])) {
+            $map[$code] = !empty($row['is_visible']);
+        }
+    }
+    return $map;
+}
+
+function hh_hub_module_is_visible(PDO $pdo, $siteCode)
+{
+    $map = hh_hub_modules_visible_map($pdo);
+    return !empty($map[$siteCode]);
+}
+
+function hh_hub_section_set_visible(PDO $pdo, $siteCode, $visible)
+{
+    if (!hh_sites_table_exists($pdo)) {
+        return false;
+    }
+    $st = $pdo->prepare('UPDATE hh_hub_sections SET is_visible = ? WHERE site_code = ?');
+    $st->execute(array($visible ? 1 : 0, (string) $siteCode));
+    return $st->rowCount() > 0;
+}
+
+function hh_hub_sections_admin_list(PDO $pdo)
+{
+    if (!hh_sites_table_exists($pdo)) {
+        return array();
+    }
+    try {
+        $st = $pdo->query('SELECT id, site_code, title_en, title_zh, desc_en, desc_zh, entry_path, badge, sort_order, is_visible FROM hh_hub_sections ORDER BY sort_order ASC, id ASC');
+    } catch (Throwable $e) {
+        return array();
+    }
+    return $st->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function hh_hub_section_save(PDO $pdo, $id, array $data)
+{
+    $id = (int) $id;
+    if ($id <= 0) {
+        return false;
+    }
+    $st = $pdo->prepare('UPDATE hh_hub_sections SET title_en = ?, title_zh = ?, desc_en = ?, desc_zh = ?, badge = ?, sort_order = ?, is_visible = ? WHERE id = ?');
+    $st->execute(array(
+        (string) ($data['title_en'] ?? ''),
+        (string) ($data['title_zh'] ?? ''),
+        (string) ($data['desc_en'] ?? ''),
+        (string) ($data['desc_zh'] ?? ''),
+        in_array($data['badge'] ?? '', array('live', 'soon'), true) ? $data['badge'] : 'soon',
+        (int) ($data['sort_order'] ?? 0),
+        !empty($data['is_visible']) ? 1 : 0,
+        $id,
+    ));
+    return $st->rowCount() > 0;
+}
+
 function hh_site_status_by_code(PDO $pdo, $siteCode)
 {
     foreach (hh_sites_list($pdo) as $row) {
@@ -115,6 +186,26 @@ function hh_hub_section_public_url($locale, $siteCode, PDO $pdo)
         return hh_site_public_url($locale, $siteCode);
     }
     return '';
+}
+
+/** @return array<string, array{title:string,desc:string}> */
+function hh_hub_section_ui_keys()
+{
+    return array(
+        'handhelds' => array('title' => 'section_handhelds_title', 'desc' => 'section_handhelds_desc'),
+        'game' => array('title' => 'section_games_title', 'desc' => 'section_games_desc'),
+        'news' => array('title' => 'section_news_title', 'desc' => 'section_news_desc'),
+    );
+}
+
+function hh_hub_section_field_text($locale, $siteCode, $field, $dbValue)
+{
+    require_once __DIR__ . '/hub_layout.php';
+    $keys = hh_hub_section_ui_keys();
+    if (isset($keys[$siteCode][$field])) {
+        return hh_hub_ui($locale, $keys[$siteCode][$field]);
+    }
+    return trim((string) $dbValue);
 }
 
 function hh_hub_sections_for_home(PDO $pdo, $locale)
@@ -157,8 +248,8 @@ function hh_hub_sections_for_home(PDO $pdo, $locale)
         }
         $out[] = array(
             'site_code' => $siteCode,
-            'title' => $locale === 'zh' ? (string) $r['title_zh'] : (string) $r['title_en'],
-            'desc' => $locale === 'zh' ? (string) ($r['desc_zh'] ?? '') : (string) ($r['desc_en'] ?? ''),
+            'title' => hh_hub_section_field_text($locale, $siteCode, 'title', $locale === 'zh' ? (string) $r['title_zh'] : (string) $r['title_en']),
+            'desc' => hh_hub_section_field_text($locale, $siteCode, 'desc', $locale === 'zh' ? (string) ($r['desc_zh'] ?? '') : (string) ($r['desc_en'] ?? '')),
             'badge' => $badge,
             'url' => $url,
         );

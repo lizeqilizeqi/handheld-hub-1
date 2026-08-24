@@ -38,6 +38,11 @@ function hh_site_definitions()
                 'hosts' => array('game.oldmanhub.com', 'game.localhost'),
                 'base_url' => 'https://game.oldmanhub.com',
             ),
+            'news' => array(
+                'code' => 'news',
+                'hosts' => array('news.oldmanhub.com', 'news.localhost'),
+                'base_url' => 'https://news.oldmanhub.com',
+            ),
         );
         return $defs;
     }
@@ -146,4 +151,19 @@ function hh_site_is_handhelds()
 function hh_site_is_game()
 {
     return hh_site_code() === 'game';
+}
+
+function hh_vertical_site_codes()
+{
+    return array('game', 'news');
+}
+
+function hh_site_is_vertical()
+{
+    return in_array(hh_site_code(), hh_vertical_site_codes(), true);
+}
+
+function hh_site_is_news()
+{
+    return hh_site_code() === 'news';
 }

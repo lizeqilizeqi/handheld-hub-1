@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/translate_service.php';
+require_once __DIR__ . '/content_translate.php';
 
 function hh_translate_pid_path($jobId)
 {
@@ -34,7 +35,12 @@ function hh_translate_get_running_job(PDO $pdo)
 
 function hh_translate_recover_stale_jobs(PDO $pdo)
 {
-    $st = $pdo->query('SELECT id, started_at FROM hh_translate_jobs WHERE status = "running"');
+    $st = $pdo->query(
+        'SELECT j.id, j.started_at, j.current_index,
+            (SELECT MAX(l.created_at) FROM hh_translate_logs l WHERE l.job_id = j.id) AS last_log_at
+         FROM hh_translate_jobs j
+         WHERE j.status = "running"'
+    );
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $id = (int) $row['id'];
         $pidFile = hh_translate_pid_path($id);
@@ -44,7 +50,19 @@ function hh_translate_recover_stale_jobs(PDO $pdo)
         }
         $started = !empty($row['started_at']) ? strtotime((string) $row['started_at']) : 0;
         $ageSec = $started > 0 ? max(0, time() - $started) : 9999;
-        if ($ageSec >= 45 || ($pid <= 0 && $ageSec >= 20)) {
+        $lastLog = !empty($row['last_log_at']) ? strtotime((string) $row['last_log_at']) : 0;
+        $logAgeSec = $lastLog > 0 ? max(0, time() - $lastLog) : $ageSec;
+        $progress = (int) ($row['current_index'] ?? 0);
+
+        // Still translating (logs or progress recently): do not kill the job.
+        if ($progress > 0 && $logAgeSec < 900) {
+            continue;
+        }
+        if ($pid <= 0 && $progress > 0 && $ageSec < 7200) {
+            continue;
+        }
+
+        if ($ageSec >= 120 && ($progress === 0 || $logAgeSec >= 900)) {
             hh_translate_job_finish($pdo, $id, array(
                 'status' => 'failed',
                 'message' => '任务未正常启动或已中断，请重新批量翻译。',
@@ -66,6 +84,7 @@ function hh_translate_spawn_background($jobId)
     $cmd = implode(' ', array(
         'cd ' . escapeshellarg(HH_ROOT),
         '&&',
+        'nohup',
         escapeshellarg($php),
         escapeshellarg($script),
         '--job-id=' . (int) $jobId,
@@ -105,7 +124,57 @@ function hh_translate_queue_batch(PDO $pdo, $ids)
         throw new RuntimeException('没有可翻译的掌机');
     }
 
-    $jobId = hh_translate_job_create($pdo, $ids);
+    $jobId = hh_translate_job_create($pdo, $ids, 'handheld');
+    hh_translate_log($pdo, $jobId, 'info', 0, '', '任务已创建，正在启动后台进程…');
+    try {
+        hh_translate_spawn_background($jobId);
+    } catch (Throwable $e) {
+        hh_translate_log($pdo, $jobId, 'error', 0, '', $e->getMessage());
+        hh_translate_job_finish($pdo, $jobId, array(
+            'status' => 'failed',
+            'message' => $e->getMessage(),
+        ));
+        throw $e;
+    }
+    hh_translate_log($pdo, $jobId, 'info', 0, '', '后台进程已启动');
+    return $jobId;
+}
+
+function hh_translate_queue_content_batch(PDO $pdo, $target, $limit = 20)
+{
+    hh_translate_recover_stale_jobs($pdo);
+
+    $running = hh_translate_get_running_job($pdo);
+    if ($running) {
+        throw new RuntimeException('已有翻译任务 #' . (int) $running['id'] . ' 正在运行，请等待完成或刷新页面自动清理卡住的任务。');
+    }
+
+    $target = (string) $target;
+    $limit = max(1, min(100, (int) $limit));
+    if ($target === 'news') {
+        $ids = hh_feed_translate_pending_ids($pdo, $limit);
+        $emptyMsg = '没有待翻译的资讯';
+    } elseif ($target === 'game') {
+        if (!hh_game_table_exists($pdo)) {
+            throw new RuntimeException('游戏表不存在');
+        }
+        $st = $pdo->query(
+            'SELECT id FROM hh_game_entries WHERE TRIM(title_zh) <> "" AND (TRIM(title_en) = "" OR TRIM(summary_en) = "") ORDER BY updated_at DESC LIMIT ' . $limit
+        );
+        $ids = array_map('intval', array_column($st->fetchAll(PDO::FETCH_ASSOC), 'id'));
+        $emptyMsg = '没有待翻译的游戏条目';
+    } else {
+        throw new RuntimeException('未知翻译类型');
+    }
+
+    $ids = array_values(array_unique(array_filter($ids, function ($v) {
+        return $v > 0;
+    })));
+    if (count($ids) === 0) {
+        throw new RuntimeException($emptyMsg);
+    }
+
+    $jobId = hh_translate_job_create($pdo, $ids, $target);
     hh_translate_log($pdo, $jobId, 'info', 0, '', '任务已创建，正在启动后台进程…');
     try {
         hh_translate_spawn_background($jobId);
@@ -146,6 +215,9 @@ function hh_translate_execute_job($jobId)
 {
     $pdo = hh_pdo();
     $jobId = (int) $jobId;
+
+    $pidFile = hh_translate_pid_path($jobId);
+    @file_put_contents($pidFile, getmypid() . "\n");
 
     register_shutdown_function(function () use ($jobId) {
         @unlink(hh_translate_pid_path($jobId));

@@ -22,6 +22,27 @@ function hh_llms_txt(PDO $pdo = null)
         '- Hub (中文): ' . hh_site_public_url('zh', 'hub'),
         '- Handhelds: ' . hh_site_public_url('en', 'handhelds'),
         '- Handhelds (中文): ' . hh_site_public_url('zh', 'handhelds'),
+    );
+
+    if ($pdo !== null) {
+        $extra = array();
+        foreach (hh_sites_list($pdo) as $site) {
+            if ($site['code'] === 'hub' || $site['code'] === 'handhelds') {
+                continue;
+            }
+            $tag = $site['status'] === 'live' ? 'live' : 'soon';
+            $extra[] = '- ' . $site['name_en'] . ' / ' . $site['name_zh'] . ': ' . $site['base_url'] . ' [' . $tag . ']';
+        }
+        if ($extra !== array()) {
+            $lines[] = '';
+            $lines[] = '## Sites';
+            foreach ($extra as $row) {
+                $lines[] = $row;
+            }
+        }
+    }
+
+    $lines = array_merge($lines, array(
         '',
         '## Policies',
         '- About: ' . hh_site_public_url('en/about', 'hub'),
@@ -38,19 +59,7 @@ function hh_llms_txt(PDO $pdo = null)
         '',
         '## Crawling',
         'Allow indexing of public /en and /zh pages. Do not index /admin/.',
-    );
-
-    if ($pdo !== null) {
-        foreach (hh_sites_list($pdo) as $site) {
-            if ($site['code'] === 'hub' || $site['code'] === 'handhelds') {
-                continue;
-            }
-            if ($site['status'] !== 'live') {
-                continue;
-            }
-            $lines[] = '- ' . $site['name_en'] . ': ' . $site['base_url'];
-        }
-    }
+    ));
 
     return implode("\n", $lines) . "\n";
 }
@@ -62,6 +71,20 @@ function hh_sitemap_index_xml(PDO $pdo)
         array('loc' => hh_site_public_url('sitemap.xml', 'hub'), 'lastmod' => $now),
         array('loc' => hh_site_public_url('sitemap.xml', 'handhelds'), 'lastmod' => $now),
     );
+    if ($pdo !== null) {
+        foreach (hh_sites_list($pdo) as $site) {
+            if (!in_array($site['code'], hh_vertical_site_codes(), true)) {
+                continue;
+            }
+            if ($site['base_url'] === '') {
+                continue;
+            }
+            $entries[] = array(
+                'loc' => rtrim($site['base_url'], '/') . '/sitemap.xml',
+                'lastmod' => $now,
+            );
+        }
+    }
     $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
     $xml .= '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
     foreach ($entries as $e) {

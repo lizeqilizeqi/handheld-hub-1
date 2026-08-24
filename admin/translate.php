@@ -9,10 +9,14 @@ require_once dirname(__DIR__) . '/lib/secrets.php';
 require_once dirname(__DIR__) . '/lib/deepseek.php';
 require_once dirname(__DIR__) . '/lib/translate_service.php';
 require_once dirname(__DIR__) . '/lib/translate_runner.php';
+require_once dirname(__DIR__) . '/lib/content_translate.php';
 
 $pdo = hh_pdo();
 $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+$newsId = isset($_GET['news_id']) ? (int) $_GET['news_id'] : 0;
+$gameId = isset($_GET['game_id']) ? (int) $_GET['game_id'] : 0;
 $msg = '';
+$runningJob = null;
 if (isset($_GET['started'])) {
     $startedId = (int) $_GET['started'];
     $startedJob = hh_translate_job_by_id($pdo, $startedId);
@@ -57,6 +61,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = '已取消卡住的翻译任务，可以重新启动批量翻译。';
         } else {
             $err = '当前没有运行中的翻译任务。';
+        }
+    } elseif ($action === 'translate_news_batch') {
+        $token = isset($_POST['csrf']) ? (string) $_POST['csrf'] : '';
+        if (!hh_translate_check_csrf($token)) {
+            $err = '会话已过期，请刷新后重试';
+        } elseif (!hh_deepseek_api_key_configured()) {
+            $err = '请先配置 DeepSeek API Key';
+        } elseif ($runningJob = hh_translate_get_running_job($pdo)) {
+            $err = '已有翻译任务 #' . (int) $runningJob['id'] . ' 正在运行，请等待完成。';
+        } else {
+            $limit = isset($_POST['limit']) ? max(1, min(100, (int) $_POST['limit'])) : 20;
+            try {
+                $jobId = hh_translate_queue_content_batch($pdo, 'news', $limit);
+                header('Location: translate.php?started=' . (int) $jobId . '&channel=news', true, 302);
+                exit;
+            } catch (Throwable $e) {
+                $err = $e->getMessage();
+            }
+        }
+    } elseif ($action === 'translate_game_batch') {
+        $token = isset($_POST['csrf']) ? (string) $_POST['csrf'] : '';
+        if (!hh_translate_check_csrf($token)) {
+            $err = '会话已过期，请刷新后重试';
+        } elseif (!hh_deepseek_api_key_configured()) {
+            $err = '请先配置 DeepSeek API Key';
+        } elseif ($runningJob = hh_translate_get_running_job($pdo)) {
+            $err = '已有翻译任务 #' . (int) $runningJob['id'] . ' 正在运行，请等待完成。';
+        } else {
+            $limit = isset($_POST['limit']) ? max(1, min(100, (int) $_POST['limit'])) : 20;
+            try {
+                $jobId = hh_translate_queue_content_batch($pdo, 'game', $limit);
+                header('Location: translate.php?started=' . (int) $jobId . '&channel=game', true, 302);
+                exit;
+            } catch (Throwable $e) {
+                $err = $e->getMessage();
+            }
+        }
+    } elseif ($action === 'translate_news') {
+        $token = isset($_POST['csrf']) ? (string) $_POST['csrf'] : '';
+        if (!hh_translate_check_csrf($token)) {
+            $err = '会话已过期，请刷新后重试';
+        } elseif (!hh_deepseek_api_key_configured()) {
+            $err = '请先配置 DeepSeek API Key';
+        } else {
+            $newsId = isset($_POST['news_id']) ? (int) $_POST['news_id'] : 0;
+            try {
+                hh_content_translate_feed_item($pdo, $newsId);
+                $msg = '资讯英文标题与摘要已生成。';
+            } catch (Throwable $e) {
+                $err = $e->getMessage();
+            }
+        }
+    } elseif ($action === 'translate_game') {
+        $token = isset($_POST['csrf']) ? (string) $_POST['csrf'] : '';
+        if (!hh_translate_check_csrf($token)) {
+            $err = '会话已过期，请刷新后重试';
+        } elseif (!hh_deepseek_api_key_configured()) {
+            $err = '请先配置 DeepSeek API Key';
+        } else {
+            $gameId = isset($_POST['game_id']) ? (int) $_POST['game_id'] : 0;
+            try {
+                hh_content_translate_game_entry($pdo, $gameId);
+                $msg = '游戏英文元数据已生成。';
+            } catch (Throwable $e) {
+                $err = $e->getMessage();
+            }
         }
     } elseif ($action === 'translate_batch') {
         $token = isset($_POST['csrf']) ? (string) $_POST['csrf'] : '';
@@ -155,10 +225,10 @@ $runningJob = hh_translate_get_running_job($pdo);
 $recentJobs = hh_translate_jobs_recent($pdo, 8);
 
 $watchJobId = 0;
-if ($runningJob) {
-    $watchJobId = (int) $runningJob['id'];
-} elseif (isset($_GET['started'])) {
+if (isset($_GET['started'])) {
     $watchJobId = (int) $_GET['started'];
+} elseif ($runningJob) {
+    $watchJobId = (int) $runningJob['id'];
 } elseif (isset($_GET['job_id'])) {
     $watchJobId = (int) $_GET['job_id'];
 }
@@ -190,7 +260,7 @@ hh_admin_layout_start('translate');
   <div class="scrape-log-box" id="translate-log-box" aria-live="polite">
     <div class="scrape-log-empty" id="translate-log-empty">等待日志…</div>
   </div>
-  <p class="muted scrape-log-hint">每 2 秒自动刷新。黄色=正在翻译，绿色=完成，红色=失败。</p>
+  <p class="muted scrape-log-hint">每 2 秒自动刷新。若进度长时间不动，页面也会每 8 秒自动刷新一次。</p>
 </div>
 <?php endif; ?>
 
@@ -216,8 +286,72 @@ hh_admin_layout_start('translate');
     <li><strong>状态说明</strong>：<span class="badge badge-draft">待翻译</span> = 还没有英文；<span class="badge badge-published">已翻译（待审核）</span> = DeepSeek 已生成英文，<strong>不算</strong>待翻译；审核后可标记「人工已通过」。</li>
     <li><strong>翻译全部</strong>：下拉选「一键翻译全部待翻译」可一次处理所有待翻译项（不限当前页）。</li>
     <li><strong>建议流程</strong>：抓取 → 批量翻译 → 预览批改 → 标记「人工已通过」→ 独立站发布。</li>
+    <li><strong>资讯 / 复古游戏</strong>：下方批量按钮与掌机相同，在<strong>后台任务</strong>中运行，有进度条与日志（避免 Cloudflare 524 超时）。</li>
   </ul>
 </div>
+
+<div class="card grid-2">
+  <div>
+    <h3>资讯（news）</h3>
+    <p class="muted">待翻译：抓取后 translate_status=pending 的条目。</p>
+    <form method="post">
+      <input type="hidden" name="action" value="translate_news_batch">
+      <input type="hidden" name="csrf" value="<?php echo hh_h($csrf); ?>">
+      <label>条数 <input type="number" name="limit" value="20" min="1" max="100" style="width:4rem"></label>
+      <button type="submit" class="btn" id="btn-news-batch"<?php echo ($apiConfigured && !$runningJob) ? '' : ' disabled'; ?>>批量翻译资讯</button>
+    </form>
+    <p><a href="feeds.php">打开资讯列表</a></p>
+  </div>
+  <div>
+    <h3>复古游戏（game）</h3>
+    <p class="muted">有中文标题、缺英文摘要/标题的条目。</p>
+    <form method="post">
+      <input type="hidden" name="action" value="translate_game_batch">
+      <input type="hidden" name="csrf" value="<?php echo hh_h($csrf); ?>">
+      <label>条数 <input type="number" name="limit" value="20" min="1" max="100" style="width:4rem"></label>
+      <button type="submit" class="btn" id="btn-game-batch"<?php echo ($apiConfigured && !$runningJob) ? '' : ' disabled'; ?>>批量翻译游戏</button>
+    </form>
+    <p><a href="games.php">打开复古游戏列表</a></p>
+  </div>
+</div>
+
+<?php if ($newsId > 0):
+  require_once dirname(__DIR__) . '/lib/feed_repo.php';
+  $newsRow = hh_feed_item_by_id($pdo, $newsId);
+?>
+<?php if ($newsRow): ?>
+<div class="card">
+  <h3><?php echo hh_h(hh_admin_t('generate_en')); ?> — 资讯 #<?php echo (int) $newsId; ?></h3>
+  <p class="muted"><?php echo hh_h($newsRow['title_zh'] ?: $newsRow['title']); ?></p>
+  <form method="post">
+    <input type="hidden" name="action" value="translate_news">
+    <input type="hidden" name="csrf" value="<?php echo hh_h($csrf); ?>">
+    <input type="hidden" name="news_id" value="<?php echo (int) $newsId; ?>">
+    <button type="submit"<?php echo $apiConfigured ? '' : ' disabled'; ?>><?php echo hh_h(hh_admin_t('generate_en')); ?></button>
+    <a class="btn btn-secondary" href="feeds.php?id=<?php echo (int) $newsId; ?>"><?php echo hh_h(hh_admin_t('back_edit')); ?></a>
+  </form>
+</div>
+<?php endif; ?>
+<?php endif; ?>
+
+<?php if ($gameId > 0):
+  require_once dirname(__DIR__) . '/lib/game_repo.php';
+  $gameRow = hh_game_by_id($pdo, $gameId);
+?>
+<?php if ($gameRow): ?>
+<div class="card">
+  <h3><?php echo hh_h(hh_admin_t('generate_en')); ?> — 游戏 #<?php echo (int) $gameId; ?></h3>
+  <p class="muted"><?php echo hh_h($gameRow['title_zh'] ?: $gameRow['title_en']); ?></p>
+  <form method="post">
+    <input type="hidden" name="action" value="translate_game">
+    <input type="hidden" name="csrf" value="<?php echo hh_h($csrf); ?>">
+    <input type="hidden" name="game_id" value="<?php echo (int) $gameId; ?>">
+    <button type="submit"<?php echo $apiConfigured ? '' : ' disabled'; ?>><?php echo hh_h(hh_admin_t('generate_en')); ?></button>
+    <a class="btn btn-secondary" href="games.php?id=<?php echo (int) $gameId; ?>"><?php echo hh_h(hh_admin_t('back_edit')); ?></a>
+  </form>
+</div>
+<?php endif; ?>
+<?php endif; ?>
 
 <?php if ($id > 0):
   $h = hh_handheld_by_id($pdo, $id);
@@ -397,9 +531,9 @@ hh_admin_layout_start('translate');
 
   function openModal() { modal.hidden = false; input.value = ''; input.focus(); }
   function closeModal() { modal.hidden = true; }
-  openBtn.addEventListener('click', openModal);
-  closeBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+  if (openBtn) openBtn.addEventListener('click', openModal);
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  if (modal) modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
   <?php if (!$apiConfigured): ?>openModal();<?php endif; ?>
 
@@ -430,7 +564,11 @@ hh_admin_layout_start('translate');
       }
     });
   }
-
+})();
+</script>
+<?php if ($watchJob): ?>
+<script>
+(function () {
   var monitor = document.getElementById('translate-monitor');
   if (!monitor) return;
 
@@ -439,7 +577,9 @@ hh_admin_layout_start('translate');
   var logBox = document.getElementById('translate-log-box');
   var emptyEl = document.getElementById('translate-log-empty');
   var timer = null;
+  var refreshTimer = null;
   var levelClass = { fetch: 'log-fetch', ok: 'log-ok', error: 'log-error', info: 'log-info' };
+  var pollUrl = 'translate_live.php?job_id=' + encodeURIComponent(jobId) + '&after_id=';
 
   function esc(s) {
     var d = document.createElement('div');
@@ -459,12 +599,18 @@ hh_admin_layout_start('translate');
   }
 
   function enableBatchForm() {
-    var btn = document.getElementById('btn-batch-translate');
-    if (btn) btn.disabled = false;
+    ['btn-batch-translate', 'btn-news-batch', 'btn-game-batch'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.disabled = false;
+    });
+    var batchMode = document.getElementById('batch-mode');
     if (batchMode) batchMode.disabled = false;
-    var draft = batchForm && batchForm.querySelector('[name="include_draft"]');
-    if (draft) draft.disabled = false;
-    rowChecks.forEach(function (cb) { cb.disabled = false; });
+    var batchForm = document.getElementById('batch-form');
+    if (batchForm) {
+      var draft = batchForm.querySelector('[name="include_draft"]');
+      if (draft) draft.disabled = false;
+    }
+    document.querySelectorAll('.row-check').forEach(function (cb) { cb.disabled = false; });
   }
 
   function syncRecentJobRow(job) {
@@ -489,6 +635,7 @@ hh_admin_layout_start('translate');
     enableBatchForm();
     syncRecentJobRow(data.job);
     if (timer) { clearInterval(timer); timer = null; }
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
   }
 
   function updateJob(job) {
@@ -505,13 +652,25 @@ hh_admin_layout_start('translate');
     syncRecentJobRow(job);
   }
 
-  var jobFinished = <?php echo ($watchJob && $watchJob['status'] !== 'running') ? 'true' : 'false'; ?>;
+  var jobFinished = <?php echo ($watchJob['status'] !== 'running') ? 'true' : 'false'; ?>;
+  var lastProgressKey = '';
 
   function poll() {
-    fetch('translate_live.php?job_id=' + encodeURIComponent(jobId) + '&after_id=' + lastId, { credentials: 'same-origin' })
-      .then(function (r) { return r.json(); })
+    fetch(pollUrl + lastId, { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) {
+          throw new Error('HTTP ' + r.status);
+        }
+        return r.json();
+      })
       .then(function (data) {
-        if (!data.ok) return;
+        if (!data.ok) {
+          throw new Error(data.message || 'poll failed');
+        }
+        var key = data.job.current_index + ':' + data.job.ok_count + ':' + data.job.status;
+        if (key !== lastProgressKey) {
+          lastProgressKey = key;
+        }
         updateJob(data.job);
         data.logs.forEach(function (row) {
           appendLog(row);
@@ -522,15 +681,25 @@ hh_admin_layout_start('translate');
           onJobFinished(data);
         }
       })
-      .catch(function () {});
+      .catch(function (err) {
+        if (emptyEl && emptyEl.parentNode) {
+          emptyEl.textContent = '轮询失败：' + (err && err.message ? err.message : 'network') + '，将重试…';
+        }
+      });
   }
 
   poll();
   if (!jobFinished) {
     timer = setInterval(poll, 2000);
+    refreshTimer = setInterval(function () {
+      if (!jobFinished) {
+        window.location.reload();
+      }
+    }, 8000);
   } else {
     enableBatchForm();
   }
 })();
 </script>
+<?php endif; ?>
 <?php hh_admin_layout_end(); ?>

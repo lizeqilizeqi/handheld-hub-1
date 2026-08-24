@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS hh_scrape_jobs (
 CREATE TABLE IF NOT EXISTS hh_scrape_logs (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   job_id INT UNSIGNED NULL,
-  level ENUM('info','warn','error') NOT NULL DEFAULT 'info',
+  level ENUM('info','warn','error','fetch','ok','skip') NOT NULL DEFAULT 'info',
   slug VARCHAR(128) NOT NULL DEFAULT '',
   message TEXT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

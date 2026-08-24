@@ -7,16 +7,23 @@ hh_admin_require_login();
 require_once dirname(__DIR__) . '/lib/handheld_repo.php';
 require_once dirname(__DIR__) . '/lib/secrets.php';
 require_once dirname(__DIR__) . '/lib/blogger.php';
+require_once dirname(__DIR__) . '/lib/blogger_runner.php';
 require_once __DIR__ . '/layout.php';
 
 $pdo = hh_pdo();
+hh_blogger_batch_recover_stale_jobs($pdo);
+
 $msg = isset($_GET['oauth']) && $_GET['oauth'] === 'ok' ? 'Blogger OAuth 已连接。' : '';
+if (isset($_GET['started'])) {
+    $msg = '后台 Blogger 批量任务 #' . (int) $_GET['started'] . ' 已启动，请查看下方进度。';
+}
 $err = isset($_GET['oauth']) && $_GET['oauth'] === 'err' ? (string) ($_GET['msg'] ?? 'OAuth 失败') : '';
 
 if (empty($_SESSION['hh_blogger_csrf'])) {
     $_SESSION['hh_blogger_csrf'] = bin2hex(random_bytes(16));
 }
 $csrf = (string) $_SESSION['hh_blogger_csrf'];
+session_write_close();
 
 function hh_blogger_check_csrf($csrf)
 {
@@ -42,6 +49,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $err = $r['message'];
         }
+    } elseif ($action === 'cancel_blogger_batch') {
+        $cancelJobId = isset($_POST['job_id']) ? (int) $_POST['job_id'] : 0;
+        if (hh_blogger_batch_cancel_job($pdo, $cancelJobId)) {
+            $msg = '已停止 Blogger 批量发布。';
+        } else {
+            $err = '当前没有运行中的批量任务。';
+        }
     } elseif ($action === 'blogger_mark_reset') {
         $id = isset($_POST['id']) ? (int) $_POST['id'] : 0;
         if ($id <= 0) {
@@ -61,7 +75,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $draft = !empty($_POST['as_draft']);
                 $scheduled = isset($_POST['scheduled_at']) ? trim((string) $_POST['scheduled_at']) : '';
-                $publishLocale = isset($_POST['publish_locale']) ? (string) $_POST['publish_locale'] : 'both';
                 $opts = array(
                     'draft' => $draft,
                     'labels' => array_filter(array_map('trim', explode(',', isset($_POST['labels']) ? (string) $_POST['labels'] : 'handheld,gaming'))),
@@ -69,13 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($scheduled !== '') {
                     $opts['scheduled_at'] = date('c', strtotime($scheduled));
                 }
-                $locales = array('zh', 'en');
-                if ($publishLocale === 'zh') {
-                    $locales = array('zh');
-                } elseif ($publishLocale === 'en') {
-                    $locales = array('en');
-                }
-                $posts = hh_blogger_publish_locales($pdo, $id, $locales, $opts);
+                $posts = hh_blogger_publish_locales($pdo, $id, hh_blogger_publish_locales_default(), $opts);
                 $parts = array();
                 foreach ($posts as $loc => $post) {
                     $parts[] = $loc . ': ' . ($post['url'] ?? $post['id']);
@@ -98,28 +105,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if ($ids === array()) {
                 $err = $batchMode === 'ready'
-                    ? '没有待发布到 Blogger 的掌机（需已上独立站 + 中英文正文）'
+                    ? '没有待发布到 Blogger 的掌机（需已上独立站 + 英文正文）'
                     : ($batchMode === 'ready_all'
-                        ? '没有可发布的掌机（需已上独立站 + 中英文正文）'
+                        ? '没有可发布的掌机（需已上独立站 + 英文正文）'
                         : '请先勾选要发布的掌机，或选择一键发布');
             } else {
                 try {
-                    $result = hh_blogger_publish_batch($pdo, $ids, array(
+                    $jobId = hh_blogger_batch_queue($pdo, $ids, array(
                         'labels' => array('handheld', 'gaming'),
                     ));
-                    $msg = '批量发布完成：成功 ' . (int) $result['ok'] . ' 台';
-                    if ($result['fail'] > 0) {
-                        $msg .= '，失败 ' . (int) $result['fail'] . ' 台';
-                        $sample = array_slice($result['errors'], 0, 3, true);
-                        $parts = array();
-                        foreach ($sample as $hid => $em) {
-                            $parts[] = '#' . $hid . ': ' . $em;
-                        }
-                        $err = implode('；', $parts);
-                        if (count($result['errors']) > 3) {
-                            $err .= ' …';
-                        }
-                    }
+                    $redirectFilter = isset($_POST['blogger_filter']) ? (string) $_POST['blogger_filter'] : 'pending';
+                    header('Location: blogger.php?started=' . (int) $jobId . '&blogger=' . rawurlencode($redirectFilter), true, 302);
+                    exit;
                 } catch (Throwable $e) {
                     $err = $e->getMessage();
                 }
@@ -128,16 +125,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+$bloggerFilter = isset($_GET['blogger']) ? (string) $_GET['blogger'] : 'pending';
+if (!in_array($bloggerFilter, array('all', 'pending', 'published'), true)) {
+    $bloggerFilter = 'pending';
+}
+
 $configured = hh_blogger_oauth_configured();
 $configDisplay = hh_blogger_config_display();
 $connected = hh_blogger_is_connected($pdo);
 $readyCount = hh_blogger_ready_count($pdo);
 $pendingCount = hh_blogger_pending_count($pdo);
 $publishedMarkCount = hh_blogger_published_mark_count($pdo);
-$bloggerFilter = isset($_GET['blogger']) ? (string) $_GET['blogger'] : 'pending';
-if (!in_array($bloggerFilter, array('all', 'pending', 'published'), true)) {
-    $bloggerFilter = 'pending';
+$runningBatchJob = hh_blogger_batch_get_running_job($pdo);
+$recentBatchJobs = hh_blogger_batch_jobs_recent($pdo, 8);
+
+$watchJobId = 0;
+if ($runningBatchJob) {
+    $watchJobId = (int) $runningBatchJob['id'];
+} elseif (isset($_GET['started'])) {
+    $watchJobId = (int) $_GET['started'];
+} elseif (isset($_GET['batch_job_id'])) {
+    $watchJobId = (int) $_GET['batch_job_id'];
 }
+$watchBatchJob = $watchJobId > 0 ? hh_blogger_batch_job_by_id($pdo, $watchJobId) : null;
+
 $readyIds = hh_blogger_ready_handheld_ids($pdo, $bloggerFilter);
 
 $blogs = array();
@@ -153,17 +164,13 @@ if ($connected) {
 
 $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 $h = $id > 0 ? hh_handheld_by_id($pdo, $id) : null;
-$bpZh = ($h && $id > 0) ? hh_blogger_post_row($pdo, $id, 'zh') : null;
 $bpEn = ($h && $id > 0) ? hh_blogger_post_row($pdo, $id, 'en') : null;
-$zhContent = ($h && $id > 0) ? hh_handheld_content($pdo, $id, 'zh') : null;
 $enContent = ($h && $id > 0) ? hh_handheld_content($pdo, $id, 'en') : null;
 
 $readyWhere = hh_blogger_list_where_sql($bloggerFilter);
 $listSql = 'SELECT h.*,
-    cz.review_status AS review_zh,
     ce.review_status AS review_en
     FROM hh_handhelds h
-    INNER JOIN hh_handheld_content cz ON cz.handheld_id = h.id AND cz.locale = \'zh\'
     INNER JOIN hh_handheld_content ce ON ce.handheld_id = h.id AND ce.locale = \'en\'
     WHERE ' . implode(' AND ', $readyWhere) . '
     ORDER BY h.blogger_mark ASC, h.release_date DESC, h.id DESC
@@ -176,14 +183,44 @@ hh_admin_layout_start('blogger');
 <?php if ($msg): ?><div class="alert alert-ok"><?php echo hh_h($msg); ?></div><?php endif; ?>
 <?php if ($err): ?><div class="alert alert-error"><?php echo hh_h($err); ?></div><?php endif; ?>
 
+<?php if ($watchBatchJob):
+  $total = max(1, (int) $watchBatchJob['total_count']);
+  $current = (int) $watchBatchJob['current_index'];
+  $pct = $watchBatchJob['status'] === 'done' ? 100 : min(100, (int) round($current / $total * 100));
+?>
+<div class="card scrape-running" id="blogger-batch-monitor" data-job-id="<?php echo (int) $watchBatchJob['id']; ?>" data-csrf="<?php echo hh_h($csrf); ?>">
+  <div class="scrape-monitor-head">
+    <h3>Blogger 批量发布 — 任务 #<?php echo (int) $watchBatchJob['id']; ?></h3>
+    <div class="scrape-monitor-actions">
+      <?php if (($watchBatchJob['status'] ?? '') === 'running'): ?>
+      <button type="button" class="btn btn-danger" id="btn-stop-blogger-batch">停止发布</button>
+      <?php endif; ?>
+      <span class="badge" id="blogger-batch-status-badge"><?php echo hh_h(hh_admin_status_label($watchBatchJob['status'])); ?></span>
+    </div>
+  </div>
+  <div class="progress-wrap">
+    <div class="progress-bar" id="blogger-batch-progress-bar" style="width:<?php echo (int) $pct; ?>%"></div>
+  </div>
+  <p class="progress-label" id="blogger-batch-progress-label"><?php echo (int) $pct; ?>% · <?php echo (int) $current; ?> / <?php echo (int) $watchBatchJob['total_count']; ?></p>
+  <ul class="scrape-progress">
+    <li>成功 <span id="blogger-batch-ok"><?php echo (int) $watchBatchJob['ok_count']; ?></span> · 失败 <span id="blogger-batch-fail"><?php echo (int) $watchBatchJob['fail_count']; ?></span></li>
+    <li id="blogger-batch-message"><?php echo hh_h($watchBatchJob['message'] ?: '等待启动…'); ?></li>
+  </ul>
+  <div class="scrape-log-box" id="blogger-batch-log-box" aria-live="polite">
+    <div class="scrape-log-empty" id="blogger-batch-log-empty">等待日志…</div>
+  </div>
+  <p class="muted scrape-log-hint">每 2 秒自动刷新。可关闭页面，后台会继续发布。</p>
+</div>
+<?php endif; ?>
+
 <div class="card info-box">
-  <h3>双语 Blogger 发布说明</h3>
+  <h3>English Blogger 发布说明</h3>
   <ul>
-    <li>每台掌机在 Blogger 上应有 <strong>两篇</strong>文章：一篇中文、一篇英文，分别对应独立站的 <code>/zh/</code> 与 <code>/en/</code> 页面。</li>
-    <li><strong>进入列表条件</strong>：已发布到独立站 + 中文有正文（抓取成功即视为中文 OK）+ 英文有正文。</li>
+    <li>Blogger 博客仅发布 <strong>英文</strong>文章；中文内容请使用独立站 <code>/zh/</code>。</li>
+    <li><strong>进入列表条件</strong>：已发布到独立站 + 英文有正文。</li>
     <li><strong>图片</strong>：使用 <code>storage/handhelds</code> 本地副本，经 OAuth 上传到 Google Drive 并嵌入公开链接；<strong>不会</strong>引用掌机圈等抓取源 URL。需在 Google Cloud 启用 <strong>Google Drive API</strong>，并点击「重新连接 Google」授权 Drive。</li>
     <li>正文 HTML 中的抓取源图片与外链会被自动移除，封面图单独上传。</li>
-    <li>发布成功后自动标记为 <strong>已 Blogger 发布</strong>；可随时勾选后<strong>强制再次发布</strong>更新博文。</li>
+    <li>批量发布在<strong>后台进程</strong>运行，有进度条和日志；500+ 台也不会卡死页面。按发布时间从旧到新发布，最新机型在 Blogger 首页最前。</li>
     <li>也可手动改回 <strong>未 Blogger 发布</strong>，便于区分待办与已完成。</li>
   </ul>
 </div>
@@ -255,38 +292,25 @@ hh_admin_layout_start('blogger');
 
 <?php if ($h): ?>
 <div class="card">
-  <h3>发布 — <?php echo hh_h($h['name_zh']); ?></h3>
-  <div class="grid-2">
-    <div>
-      <p><strong>中文</strong> · <?php echo trim((string) ($zhContent['body_html'] ?? '')) !== '' ? '正文就绪（抓取）' : '<span class="muted">缺正文</span>'; ?></p>
-      <?php if ($bpZh && !empty($bpZh['blogger_url'])): ?>
-      <p>已有：<a href="<?php echo hh_h($bpZh['blogger_url']); ?>" target="_blank" rel="noopener"><?php echo hh_h($bpZh['blogger_url']); ?></a></p>
-      <?php else: ?><p class="muted">尚未发布中文博文</p><?php endif; ?>
-    </div>
-    <div>
-      <p><strong>English</strong> · 独立站：<?php echo ($h['status'] ?? '') === 'published' ? '已发布' : '<span class="muted">未发布</span>'; ?></p>
-      <?php if ($bpEn && !empty($bpEn['blogger_url'])): ?>
-      <p>已有：<a href="<?php echo hh_h($bpEn['blogger_url']); ?>" target="_blank" rel="noopener"><?php echo hh_h($bpEn['blogger_url']); ?></a></p>
-      <?php else: ?><p class="muted">尚未发布英文博文</p><?php endif; ?>
-    </div>
+  <h3>发布 — <?php echo hh_h($h['name_en'] ?: $h['name_zh']); ?></h3>
+  <div>
+    <p><strong>English</strong> · <?php echo trim((string) ($enContent['body_html'] ?? '')) !== '' ? '正文就绪' : '<span class="muted">缺英文正文</span>'; ?>
+      · 独立站：<?php echo ($h['status'] ?? '') === 'published' ? '已发布' : '<span class="muted">未发布</span>'; ?></p>
+    <?php if ($bpEn && !empty($bpEn['blogger_url'])): ?>
+    <p>已有：<a href="<?php echo hh_h($bpEn['blogger_url']); ?>" target="_blank" rel="noopener"><?php echo hh_h($bpEn['blogger_url']); ?></a></p>
+    <?php else: ?><p class="muted">尚未发布英文博文</p><?php endif; ?>
   </div>
   <p>Blogger 状态：<span class="badge <?php echo ($h['blogger_mark'] ?? '') === 'published' ? 'badge-published' : 'badge-draft'; ?>"><?php echo hh_h(hh_blogger_mark_label($h['blogger_mark'] ?? 'none')); ?></span></p>
   <form method="post">
     <input type="hidden" name="action" value="publish">
     <input type="hidden" name="csrf" value="<?php echo hh_h($csrf); ?>">
     <input type="hidden" name="id" value="<?php echo (int) $id; ?>">
-    <label>发布语言</label>
-    <select name="publish_locale">
-      <option value="both">中英文一起发布（推荐）</option>
-      <option value="zh">仅中文</option>
-      <option value="en">仅英文</option>
-    </select>
     <label>标签（逗号分隔）</label>
-    <input name="labels" value="handheld,gaming,<?php echo hh_h($h['brand']); ?>">
+    <input name="labels" value="handheld,gaming,english,<?php echo hh_h($h['brand']); ?>">
     <label>定时发布（可选，本地时间）</label>
     <input type="datetime-local" name="scheduled_at">
     <label><input type="checkbox" name="as_draft" value="1"> 仅保存为草稿</label>
-    <button type="submit"<?php echo ($configured && $connected) ? '' : ' disabled'; ?>>发布到 Blogger</button>
+    <button type="submit"<?php echo ($configured && $connected) ? '' : ' disabled'; ?>>发布英文到 Blogger</button>
     <a class="btn btn-secondary" href="handheld.php?id=<?php echo (int) $id; ?>">编辑内容</a>
   </form>
   <?php if (($h['blogger_mark'] ?? '') === 'published'): ?>
@@ -302,6 +326,17 @@ hh_admin_layout_start('blogger');
 
 <div class="card">
   <h3>Blogger 发布列表 <span class="muted">(本页 <?php echo (int) count($list); ?> 条)</span></h3>
+  <?php if ($runningBatchJob): ?>
+  <p class="alert alert-error" id="blogger-running-banner">
+    任务 #<?php echo (int) $runningBatchJob['id']; ?> 正在后台发布。
+    <form method="post" style="display:inline;margin-left:.75rem;">
+      <input type="hidden" name="action" value="cancel_blogger_batch">
+      <input type="hidden" name="job_id" value="<?php echo (int) $runningBatchJob['id']; ?>">
+      <input type="hidden" name="csrf" value="<?php echo hh_h($csrf); ?>">
+      <button type="submit" class="btn btn-danger" style="padding:.35rem .65rem;font-size:.85rem;" onclick="return confirm('确定停止 Blogger 批量发布？\n\n已成功的不会回滚，未完成的将停止。');">停止发布</button>
+    </form>
+  </p>
+  <?php endif; ?>
   <form method="get" class="publish-filters" style="margin-bottom:1rem;">
     <div class="publish-filter-row">
       <label>Blogger 状态</label>
@@ -316,31 +351,30 @@ hh_admin_layout_start('blogger');
   <form method="post" id="blogger-batch-form">
     <input type="hidden" name="action" value="publish_batch">
     <input type="hidden" name="csrf" value="<?php echo hh_h($csrf); ?>">
+    <input type="hidden" name="blogger_filter" value="<?php echo hh_h($bloggerFilter); ?>">
     <div class="batch-bar">
-      <label class="batch-check"><input type="checkbox" id="select-all"> 全选本页</label>
-      <select name="batch_mode" id="batch-mode">
+      <label class="batch-check"><input type="checkbox" id="select-all"<?php echo $runningBatchJob ? ' disabled' : ''; ?>> 全选本页</label>
+      <select name="batch_mode" id="batch-mode"<?php echo $runningBatchJob ? ' disabled' : ''; ?>>
         <option value="selected">发布所选（勾选下方，可含已发布项强制更新）</option>
         <option value="ready">一键发布全部未发 Blogger（<?php echo (int) $pendingCount; ?> 台）</option>
         <option value="ready_all">一键发布全部可发布（<?php echo (int) $readyCount; ?> 台，含已发布）</option>
       </select>
-      <button type="submit" class="btn" id="btn-batch-blogger"<?php echo ($configured && $connected && $readyCount > 0) ? '' : ' disabled'; ?>>一键批量发布</button>
-      <span class="muted batch-hint">每台发布中/英两篇；成功后自动标为已 Blogger 发布</span>
+      <button type="submit" class="btn" id="btn-batch-blogger"<?php echo ($configured && $connected && $readyCount > 0 && !$runningBatchJob) ? '' : ' disabled'; ?>>一键批量发布（英文）</button>
+      <span class="muted batch-hint">后台发布，不卡页面；按发布时间从旧到新（最新机型在 Blogger 首页最前）</span>
     </div>
     <table>
-      <tr><th style="width:2.5rem"></th><th>名称</th><th>品牌</th><th>独立站</th><th>Blogger 状态</th><th>Blogger 中文</th><th>Blogger 英文</th><th></th></tr>
+      <tr><th style="width:2.5rem"></th><th>名称（EN）</th><th>品牌</th><th>独立站</th><th>Blogger 状态</th><th>Blogger 英文</th><th></th></tr>
       <?php foreach ($list as $row):
-        $bpZ = hh_blogger_post_row($pdo, (int) $row['id'], 'zh');
         $bpE = hh_blogger_post_row($pdo, (int) $row['id'], 'en');
         $isPending = ($row['blogger_mark'] ?? 'none') !== 'published';
         $checked = $isPending && $bloggerFilter === 'pending';
       ?>
       <tr>
-        <td><input type="checkbox" class="row-check" name="ids[]" value="<?php echo (int) $row['id']; ?>"<?php echo $checked ? ' checked' : ''; ?>></td>
-        <td><?php echo hh_h($row['name_zh']); ?></td>
+        <td><input type="checkbox" class="row-check" name="ids[]" value="<?php echo (int) $row['id']; ?>"<?php echo $checked ? ' checked' : ''; ?><?php echo $runningBatchJob ? ' disabled' : ''; ?>></td>
+        <td><?php echo hh_h($row['name_en'] ?: $row['name_zh'] ?: $row['slug']); ?></td>
         <td><?php echo hh_h($row['brand']); ?></td>
         <td><span class="badge badge-published">已发布</span></td>
         <td><span class="badge <?php echo ($row['blogger_mark'] ?? '') === 'published' ? 'badge-published' : 'badge-draft'; ?>"><?php echo hh_h(hh_blogger_mark_label($row['blogger_mark'] ?? 'none')); ?></span></td>
-        <td><?php echo hh_h($bpZ['sync_status'] ?? '无'); ?></td>
         <td><?php echo hh_h($bpE['sync_status'] ?? '无'); ?></td>
         <td>
           <a href="blogger.php?id=<?php echo (int) $row['id']; ?>&amp;blogger=<?php echo hh_h($bloggerFilter); ?>">发布</a>
@@ -421,15 +455,140 @@ hh_admin_layout_start('blogger');
     batchForm.addEventListener('submit', function (e) {
       var mode = batchMode ? batchMode.value : 'selected';
       var msg = mode === 'ready'
-        ? '确定一键发布全部「未 Blogger 发布」的掌机？\n\n每台将发布/更新中、英两篇。'
+        ? '确定一键发布全部「未 Blogger 发布」的掌机？\n\n按发布时间从旧到新依次发布英文博文（最新机型在 Blogger 首页最前）。'
         : (mode === 'ready_all'
-          ? '确定一键发布全部可发布掌机（含已 Blogger 发布）？\n\n将强制更新 Blogger 文章。'
-          : '确定发布所选掌机到 Blogger？');
+          ? '确定一键发布全部可发布掌机（含已 Blogger 发布）？\n\n按发布时间从旧到新依次更新英文博文。'
+          : '确定发布所选掌机到 Blogger（英文）？\n\n将按发布时间从旧到新依次发布。');
       if (!confirm(msg)) {
         e.preventDefault();
       }
     });
   }
+
+  var monitor = document.getElementById('blogger-batch-monitor');
+  if (!monitor) return;
+
+  var jobId = monitor.getAttribute('data-job-id');
+  var csrf = monitor.getAttribute('data-csrf') || '';
+  var lastId = 0;
+  var logBox = document.getElementById('blogger-batch-log-box');
+  var emptyEl = document.getElementById('blogger-batch-log-empty');
+  var timer = null;
+  var stopping = false;
+  var levelClass = { fetch: 'log-fetch', ok: 'log-ok', error: 'log-error', info: 'log-info' };
+  var stopBtn = document.getElementById('btn-stop-blogger-batch');
+
+  function enableBatchControls() {
+    var banner = document.getElementById('blogger-running-banner');
+    if (banner) banner.remove();
+    var btn = document.getElementById('btn-batch-blogger');
+    if (btn) btn.disabled = false;
+    if (batchMode) batchMode.disabled = false;
+    if (selectAll) selectAll.disabled = false;
+    document.querySelectorAll('.row-check').forEach(function (cb) { cb.disabled = false; });
+  }
+
+  function onJobStopped() {
+    enableBatchControls();
+    if (stopBtn) {
+      stopBtn.disabled = true;
+      stopBtn.textContent = '已停止';
+    }
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  }
+
+  if (stopBtn) {
+    stopBtn.addEventListener('click', function () {
+      if (stopping) return;
+      if (!confirm('确定停止 Blogger 批量发布？\n\n已成功的不会回滚，未完成的将停止。')) {
+        return;
+      }
+      stopping = true;
+      stopBtn.disabled = true;
+      stopBtn.textContent = '正在停止…';
+      fetch('blogger_live.php', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel', job_id: parseInt(jobId, 10), csrf: csrf }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data.ok) {
+            stopping = false;
+            stopBtn.disabled = false;
+            stopBtn.textContent = '停止发布';
+            alert(data.message || '停止失败');
+            return;
+          }
+          poll();
+          onJobStopped();
+        })
+        .catch(function () {
+          stopping = false;
+          stopBtn.disabled = false;
+          stopBtn.textContent = '停止发布';
+          alert('停止请求失败，请刷新页面后重试');
+        });
+    });
+  }
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function appendLog(row) {
+    if (emptyEl) emptyEl.remove();
+    var line = document.createElement('div');
+    line.className = 'scrape-log-line ' + (levelClass[row.level] || 'log-info');
+    var slugPart = row.slug ? '<span class="log-slug">' + esc(row.slug) + '</span> ' : '';
+    line.innerHTML = '<span class="log-time">' + esc(row.time) + '</span> ' + slugPart + esc(row.message);
+    logBox.appendChild(line);
+    while (logBox.children.length > 300) logBox.removeChild(logBox.firstChild);
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  function updateJob(job) {
+    document.getElementById('blogger-batch-progress-bar').style.width = job.percent + '%';
+    document.getElementById('blogger-batch-progress-label').textContent =
+      job.percent + '% · ' + job.current_index + ' / ' + job.total_count;
+    document.getElementById('blogger-batch-ok').textContent = job.ok_count;
+    document.getElementById('blogger-batch-fail').textContent = job.fail_count;
+    document.getElementById('blogger-batch-message').textContent = job.message || '';
+    var badge = document.getElementById('blogger-batch-status-badge');
+    var labels = { running: '运行中', done: '完成', failed: '失败', cancelled: '已停止' };
+    var statusLabel = labels[job.status] || job.status;
+    if (job.status === 'failed' && job.message && job.message.indexOf('停止') !== -1) {
+      statusLabel = '已停止';
+    }
+    badge.textContent = statusLabel;
+    badge.className = 'badge' + (job.status === 'done' ? ' badge-published' : job.status === 'failed' ? ' badge-draft' : '');
+  }
+
+  function poll() {
+    fetch('blogger_live.php?job_id=' + encodeURIComponent(jobId) + '&after_id=' + lastId, { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok) return;
+        (data.logs || []).forEach(function (row) {
+          appendLog(row);
+          lastId = Math.max(lastId, row.id);
+        });
+        updateJob(data.job);
+        if (!data.running) {
+          onJobStopped();
+        }
+      })
+      .catch(function () {});
+  }
+
+  poll();
+  timer = setInterval(poll, 2000);
 })();
 </script>
 

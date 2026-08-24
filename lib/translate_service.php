@@ -160,14 +160,52 @@ function hh_translate_page_count(PDO $pdo, $filters = array())
     return $row ? (int) $row['c'] : 0;
 }
 
-function hh_translate_job_create(PDO $pdo, $ids)
+function hh_translate_job_create(PDO $pdo, $ids, $target = 'handheld')
 {
-    $json = json_encode(array_values($ids), JSON_UNESCAPED_UNICODE);
+    $target = (string) $target;
+    if ($target === 'handheld' || $target === '') {
+        $json = json_encode(array_values($ids), JSON_UNESCAPED_UNICODE);
+    } else {
+        $json = json_encode(array(
+            'target' => $target,
+            'ids' => array_values($ids),
+        ), JSON_UNESCAPED_UNICODE);
+    }
     $pdo->prepare(
         'INSERT INTO hh_translate_jobs (status, total_count, handheld_ids, message, started_at)
          VALUES ("running", ?, ?, "任务启动中…", NOW())'
     )->execute(array(count($ids), $json));
     return (int) $pdo->lastInsertId();
+}
+
+/** @return array{target:string,ids:int[]} */
+function hh_translate_job_ids_payload($job)
+{
+    $raw = json_decode((string) ($job['handheld_ids'] ?? '[]'), true);
+    if (!is_array($raw)) {
+        return array('target' => 'handheld', 'ids' => array());
+    }
+    if (isset($raw['target'], $raw['ids']) && is_array($raw['ids'])) {
+        return array(
+            'target' => (string) $raw['target'],
+            'ids' => array_values(array_map('intval', $raw['ids'])),
+        );
+    }
+    return array(
+        'target' => 'handheld',
+        'ids' => array_values(array_map('intval', $raw)),
+    );
+}
+
+function hh_translate_job_unit_label($target)
+{
+    if ($target === 'news') {
+        return '条资讯';
+    }
+    if ($target === 'game') {
+        return '条游戏';
+    }
+    return '台';
 }
 
 function hh_translate_job_by_id(PDO $pdo, $jobId)
@@ -180,8 +218,8 @@ function hh_translate_job_by_id(PDO $pdo, $jobId)
 function hh_translate_job_update(PDO $pdo, $jobId, $fields)
 {
     $pdo->prepare(
-        'UPDATE hh_translate_jobs SET current_index=?, ok_count=?, fail_count=?, message=?
-         WHERE id=? AND status="running"'
+        'UPDATE hh_translate_jobs SET status="running", current_index=?, ok_count=?, fail_count=?, message=?
+         WHERE id=? AND status IN ("running","failed")'
     )->execute(array(
         (int) ($fields['current_index'] ?? 0),
         (int) ($fields['ok_count'] ?? 0),
@@ -245,26 +283,30 @@ function hh_translate_jobs_recent(PDO $pdo, $limit = 10)
 function hh_translate_batch_job(PDO $pdo, $jobId)
 {
     @set_time_limit(0);
+    require_once __DIR__ . '/content_translate.php';
+
     $job = hh_translate_job_by_id($pdo, $jobId);
     if (!$job) {
         throw new RuntimeException('翻译任务不存在');
     }
 
-    $ids = json_decode((string) $job['handheld_ids'], true);
-    if (!is_array($ids)) {
-        $ids = array();
-    }
+    $pdo->prepare('UPDATE hh_translate_jobs SET status = "running" WHERE id = ?')->execute(array((int) $jobId));
+
+    $payload = hh_translate_job_ids_payload($job);
+    $target = $payload['target'];
+    $ids = $payload['ids'];
     $total = count($ids);
+    $unit = hh_translate_job_unit_label($target);
     $okCount = 0;
     $failCount = 0;
     $current = 0;
 
-    hh_translate_log($pdo, $jobId, 'info', 0, '', '批量翻译开始，共 ' . $total . ' 台');
+    hh_translate_log($pdo, $jobId, 'info', 0, '', '批量翻译开始，共 ' . $total . ' ' . $unit);
     hh_translate_job_update($pdo, $jobId, array(
         'current_index' => 0,
         'ok_count' => 0,
         'fail_count' => 0,
-        'message' => '共 ' . $total . ' 台待翻译',
+        'message' => '共 ' . $total . ' ' . $unit . '待翻译',
     ));
 
     foreach ($ids as $id) {
@@ -273,9 +315,26 @@ function hh_translate_batch_job(PDO $pdo, $jobId)
             continue;
         }
         $current++;
-        $h = hh_handheld_by_id($pdo, $id);
-        $name = $h ? ($h['name_zh'] ?: $h['slug']) : '#' . $id;
-        $slug = $h ? (string) $h['slug'] : '';
+        $name = '#' . $id;
+        $slug = '';
+
+        if ($target === 'news') {
+            $row = hh_feed_item_by_id($pdo, $id);
+            if ($row) {
+                $name = (string) ($row['title_zh'] ?: $row['title'] ?: $name);
+                $slug = (string) ($row['slug'] ?? '');
+            }
+        } elseif ($target === 'game') {
+            $row = hh_game_by_id($pdo, $id);
+            if ($row) {
+                $name = (string) ($row['title_zh'] ?: $row['title_en'] ?: $name);
+                $slug = (string) ($row['slug'] ?? '');
+            }
+        } else {
+            $h = hh_handheld_by_id($pdo, $id);
+            $name = $h ? ($h['name_zh'] ?: $h['slug']) : '#' . $id;
+            $slug = $h ? (string) $h['slug'] : '';
+        }
 
         hh_translate_log($pdo, $jobId, 'fetch', $id, $slug, '正在翻译 [' . $current . '/' . $total . '] ' . $name);
         hh_translate_job_update($pdo, $jobId, array(
@@ -286,11 +345,20 @@ function hh_translate_batch_job(PDO $pdo, $jobId)
         ));
 
         try {
-            hh_translate_handheld_to_en($pdo, $id, array());
+            if ($target === 'news') {
+                hh_content_translate_feed_item($pdo, $id);
+            } elseif ($target === 'game') {
+                hh_content_translate_game_entry($pdo, $id);
+            } else {
+                hh_translate_handheld_to_en($pdo, $id, array());
+            }
             $okCount++;
             hh_translate_log($pdo, $jobId, 'ok', $id, $slug, '完成：' . $name);
         } catch (Throwable $e) {
             $failCount++;
+            if ($target === 'news') {
+                $pdo->prepare('UPDATE hh_feed_items SET translate_status = "failed" WHERE id = ?')->execute(array($id));
+            }
             hh_translate_log($pdo, $jobId, 'error', $id, $slug, '失败：' . $e->getMessage());
         }
 

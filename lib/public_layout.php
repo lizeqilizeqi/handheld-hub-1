@@ -144,6 +144,7 @@ function hh_public_layout_start($locale, $title, $meta = array())
     $ogType = !empty($meta['og_type']) ? (string) $meta['og_type'] : 'article';
 
     echo '<!DOCTYPE html><html lang="' . hh_h($locale) . '"><head><meta charset="utf-8">';
+    echo '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">';
     echo '<meta name="viewport" content="width=device-width,initial-scale=1">';
     echo '<title>' . hh_h($title) . ' · ' . hh_h($uiSite) . '</title>';
     if ($description !== '') {
@@ -188,13 +189,12 @@ function hh_public_layout_start($locale, $title, $meta = array())
     }
 
     echo '</head><body>';
-    $hubHome = function_exists('hh_site_public_url') ? hh_site_public_url($locale, 'hub') : '';
+    $hubHome = hh_site_public_url($locale, 'hub');
+    require_once dirname(__DIR__) . '/lib/hub_layout.php';
+    $hubBrand = hh_hub_ui($locale, 'site_name');
     echo '<header class="site-header"><div class="wrap header-inner">';
-    echo '<a class="logo" href="/' . hh_h($locale) . '">' . hh_h($uiSite) . '</a>';
+    echo '<a class="logo" href="' . hh_h($hubHome) . '">' . hh_h($hubBrand) . '</a>';
     echo '<nav class="site-nav" aria-label="Main">';
-    if ($hubHome !== '' && function_exists('hh_site_is_handhelds') && hh_site_is_handhelds()) {
-        echo '<a href="' . hh_h($hubHome) . '">' . hh_h(hh_public_ui($locale, 'nav_hub')) . '</a>';
-    }
     echo '<a href="/' . hh_h($locale) . '">' . hh_h(hh_public_ui($locale, 'nav_home')) . '</a>';
     echo '<a href="/' . hh_h($locale) . '/handhelds">' . hh_h(hh_public_ui($locale, 'nav_handhelds')) . '</a>';
     echo '<a href="/' . hh_h($locale) . '/about">' . hh_h(hh_public_ui($locale, 'nav_about')) . '</a>';
@@ -210,9 +210,7 @@ function hh_public_layout_end($locale = 'en')
     echo '</main>';
     echo '<footer class="site-footer"><div class="wrap footer-inner">';
     echo '<nav class="footer-nav" aria-label="Footer">';
-    if (function_exists('hh_site_is_handhelds') && hh_site_is_handhelds()) {
-        echo '<a href="' . hh_h(hh_site_public_url($locale, 'hub')) . '">' . hh_h(hh_public_ui($locale, 'nav_hub')) . '</a>';
-    }
+    echo '<a href="' . hh_h(hh_site_public_url($locale, 'hub')) . '">' . hh_h(hh_public_ui($locale, 'nav_hub')) . '</a>';
     echo '<a href="/' . hh_h($locale) . '/about">' . hh_h(hh_public_ui($locale, 'footer_about')) . '</a>';
     echo '<a href="/' . hh_h($locale) . '/privacy">' . hh_h(hh_public_ui($locale, 'footer_privacy')) . '</a>';
     echo '<a href="/' . hh_h($locale) . '/contact">' . hh_h(hh_public_ui($locale, 'footer_contact')) . '</a>';

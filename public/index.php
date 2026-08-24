@@ -142,11 +142,41 @@ if ($site === 'handhelds') {
     exit;
 }
 
-if ($site === 'game') {
-    if (preg_match('#^/(en|zh)$#', $uri, $m)) {
-        $_GET['locale'] = $m[1];
-        require __DIR__ . '/game_home.php';
-        exit;
+if (in_array($site, hh_vertical_site_codes(), true)) {
+    if ($site === 'game') {
+        if (preg_match('#^/(en|zh)/games$#', $uri, $m)) {
+            $_GET['locale'] = $m[1];
+            require __DIR__ . '/game_games.php';
+            exit;
+        }
+        if (preg_match('#^/(en|zh)/game/([a-zA-Z0-9_-]+)$#', $uri, $m)) {
+            $_GET['locale'] = $m[1];
+            $_GET['slug'] = $m[2];
+            require __DIR__ . '/game_detail.php';
+            exit;
+        }
+        if (preg_match('#^/(en|zh)$#', $uri, $m)) {
+            $_GET['locale'] = $m[1];
+            require __DIR__ . '/game_home.php';
+            exit;
+        }
+    } else {
+        if (preg_match('#^/(en|zh)/news$#', $uri, $m)) {
+            $_GET['locale'] = $m[1];
+            require __DIR__ . '/news_list.php';
+            exit;
+        }
+        if (preg_match('#^/(en|zh)/news/([a-zA-Z0-9_-]+)$#', $uri, $m)) {
+            $_GET['locale'] = $m[1];
+            $_GET['slug'] = $m[2];
+            require __DIR__ . '/news_detail.php';
+            exit;
+        }
+        if (preg_match('#^/(en|zh)$#', $uri, $m)) {
+            $_GET['locale'] = $m[1];
+            require __DIR__ . '/news_home.php';
+            exit;
+        }
     }
 
     http_response_code(404);

@@ -7,6 +7,9 @@ hh_admin_require_login();
 require_once dirname(__DIR__) . '/lib/handheld_repo.php';
 require_once dirname(__DIR__) . '/lib/publish_service.php';
 require_once dirname(__DIR__) . '/lib/spec_i18n.php';
+require_once dirname(__DIR__) . '/lib/feed_repo.php';
+require_once dirname(__DIR__) . '/lib/game_repo.php';
+require_once dirname(__DIR__) . '/lib/site_context.php';
 
 $pdo = hh_pdo();
 $msg = '';
@@ -29,6 +32,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!hh_publish_check_csrf($token)) {
         $err = '会话已过期，请刷新后重试';
+    } elseif ($action === 'publish_news_ready') {
+        try {
+            $ids = hh_feed_publish_ready_ids($pdo, 200);
+            $n = hh_publish_feed_items($pdo, $ids);
+            $msg = '已发布 ' . (int) $n . ' 条资讯到 news 前台（status=published）。';
+            $_SESSION['hh_publish_flash'] = $msg;
+            header('Location: publish.php', true, 302);
+            exit;
+        } catch (Throwable $e) {
+            $err = $e->getMessage();
+        }
+    } elseif ($action === 'publish_games_ready') {
+        try {
+            $ids = hh_game_publish_ready_ids($pdo, 200);
+            $n = hh_publish_game_entries($pdo, $ids);
+            $msg = '已发布 ' . (int) $n . ' 条游戏到 game 前台。';
+            $_SESSION['hh_publish_flash'] = $msg;
+            header('Location: publish.php', true, 302);
+            exit;
+        } catch (Throwable $e) {
+            $err = $e->getMessage();
+        }
     } elseif ($action === 'publish' || $action === 'unpublish') {
         $batchMode = isset($_POST['batch_mode']) ? (string) $_POST['batch_mode'] : 'selected';
         $ids = isset($_POST['ids']) ? array_map('intval', (array) $_POST['ids']) : array();
@@ -89,6 +114,8 @@ $previewLocale = isset($_GET['locale']) && $_GET['locale'] === 'en' ? 'en' : 'zh
 $publishedCount = hh_handheld_count($pdo, array('status' => 'published'));
 $draftCount = hh_handheld_count($pdo, array('status' => 'draft'));
 $readyPublishCount = hh_publish_ready_count($pdo);
+$newsReadyCount = hh_feed_tables_exist($pdo) ? count(hh_feed_publish_ready_ids($pdo, 500)) : 0;
+$gamesReadyCount = hh_game_table_exists($pdo) ? count(hh_game_publish_ready_ids($pdo, 500)) : 0;
 
 hh_admin_layout_start('publish');
 ?>
@@ -103,7 +130,31 @@ hh_admin_layout_start('publish');
     <li><strong>建议流程</strong>：抓取 → 翻译英文 → 在本页预览 → 发布到独立站。（Blogger 发布是另一步，见「Blogger 发布」菜单。）</li>
     <li><strong>批量发布</strong>：可勾选本页发布，或选「一键发布全部已翻译」一次发布所有未发布且英文已翻译的掌机。</li>
     <li><strong>撤回</strong>：已发布的掌机可「撤回为草稿」，前台立即不可见。</li>
+    <li><strong>资讯 / 游戏</strong>：下方单独一键发布；条件为已翻译英文且仍为 pending/draft。</li>
   </ul>
+</div>
+
+<div class="card grid-2">
+  <div>
+    <h3>资讯发布</h3>
+    <p>待发布（已译 EN）：<strong><?php echo (int) $newsReadyCount; ?></strong></p>
+    <form method="post">
+      <input type="hidden" name="csrf" value="<?php echo hh_h($csrf); ?>">
+      <input type="hidden" name="action" value="publish_news_ready">
+      <button type="submit" class="btn"<?php echo $newsReadyCount > 0 ? '' : ' disabled'; ?>>一键发布全部可发资讯</button>
+    </form>
+    <p class="muted"><a href="feeds.php">资讯列表</a> · <a href="<?php echo hh_h(hh_site_public_url('en/news', 'news')); ?>" target="_blank" rel="noopener">news 前台</a></p>
+  </div>
+  <div>
+    <h3>复古游戏发布</h3>
+    <p>待发布（已译 EN）：<strong><?php echo (int) $gamesReadyCount; ?></strong></p>
+    <form method="post">
+      <input type="hidden" name="csrf" value="<?php echo hh_h($csrf); ?>">
+      <input type="hidden" name="action" value="publish_games_ready">
+      <button type="submit" class="btn"<?php echo $gamesReadyCount > 0 ? '' : ' disabled'; ?>>一键发布全部可发游戏</button>
+    </form>
+    <p class="muted"><a href="games.php">复古游戏列表</a> · <a href="<?php echo hh_h(hh_site_public_url('en/games', 'game')); ?>" target="_blank" rel="noopener">game 前台</a></p>
+  </div>
 </div>
 
 <div class="grid-2">

@@ -4,10 +4,68 @@ require_once __DIR__ . '/site_context.php';
 
 function hh_sitemap_xml(PDO $pdo)
 {
-    if (function_exists('hh_site_is_hub') && hh_site_is_hub()) {
+    $code = function_exists('hh_site_code') ? hh_site_code() : 'handhelds';
+    if ($code === 'hub') {
         return hh_sitemap_hub_xml();
     }
+    if (function_exists('hh_vertical_site_codes') && in_array($code, hh_vertical_site_codes(), true)) {
+        return hh_sitemap_vertical_xml($code, $pdo);
+    }
     return hh_sitemap_handhelds_xml($pdo);
+}
+
+function hh_sitemap_vertical_xml($siteCode, PDO $pdo = null)
+{
+    $urls = array();
+    $now = date('c');
+    foreach (array('en', 'zh') as $locale) {
+        $urls[] = array(
+            'loc' => hh_site_public_url($locale, $siteCode),
+            'lastmod' => $now,
+            'priority' => '0.6',
+        );
+    }
+    if ($siteCode === 'game' && $pdo !== null) {
+        require_once __DIR__ . '/game_repo.php';
+        foreach (array('en', 'zh') as $locale) {
+            $urls[] = array(
+                'loc' => hh_site_public_url($locale . '/games', 'game'),
+                'lastmod' => $now,
+                'priority' => '0.7',
+            );
+        }
+        foreach (hh_game_list($pdo, array('limit' => 5000)) as $row) {
+            $last = !empty($row['updated_at']) ? date('c', strtotime((string) $row['updated_at'])) : $now;
+            foreach (array('en', 'zh') as $locale) {
+                $urls[] = array(
+                    'loc' => hh_site_public_url($locale . '/game/' . $row['slug'], 'game'),
+                    'lastmod' => $last,
+                    'priority' => '0.8',
+                );
+            }
+        }
+    }
+    if ($siteCode === 'news' && $pdo !== null) {
+        require_once __DIR__ . '/feed_repo.php';
+        foreach (array('en', 'zh') as $locale) {
+            $urls[] = array(
+                'loc' => hh_site_public_url($locale . '/news', 'news'),
+                'lastmod' => $now,
+                'priority' => '0.7',
+            );
+        }
+        foreach (hh_feed_items_public($pdo, array('limit' => 5000)) as $row) {
+            $last = !empty($row['updated_at']) ? date('c', strtotime((string) $row['updated_at'])) : $now;
+            foreach (array('en', 'zh') as $locale) {
+                $urls[] = array(
+                    'loc' => hh_site_public_url($locale . '/news/' . $row['slug'], 'news'),
+                    'lastmod' => $last,
+                    'priority' => '0.75',
+                );
+            }
+        }
+    }
+    return hh_sitemap_build_urlset($urls);
 }
 
 function hh_sitemap_hub_xml()

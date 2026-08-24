@@ -32,6 +32,32 @@ function hh_unpublish_handhelds(PDO $pdo, array $ids)
     return hh_publish_set_status($pdo, $ids, 'draft');
 }
 
+function hh_publish_feed_items(PDO $pdo, array $ids)
+{
+    require_once __DIR__ . '/feed_repo.php';
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+    if ($ids === array()) {
+        return 0;
+    }
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    $st = $pdo->prepare('UPDATE hh_feed_items SET status = "published" WHERE id IN (' . $ph . ')');
+    $st->execute($ids);
+    return $st->rowCount();
+}
+
+function hh_publish_game_entries(PDO $pdo, array $ids)
+{
+    require_once __DIR__ . '/game_repo.php';
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+    if ($ids === array()) {
+        return 0;
+    }
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    $st = $pdo->prepare('UPDATE hh_game_entries SET status = "published", published_at = COALESCE(published_at, NOW()) WHERE id IN (' . $ph . ')');
+    $st->execute($ids);
+    return $st->rowCount();
+}
+
 function hh_publish_ready_where_sql()
 {
     return array(

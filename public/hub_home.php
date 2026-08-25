@@ -62,10 +62,12 @@ hh_hub_layout_start($locale, $title, array(
       <h2><?php echo hh_h($sec['title']); ?></h2>
       <span class="<?php echo hh_h($badgeClass); ?>"><?php echo hh_h($badgeLabel); ?></span>
     </div>
-    <p><?php echo hh_h($sec['desc']); ?></p>
-    <?php if ($isLive && $sec['site_code'] === 'handhelds'): ?>
-    <p class="hub-section-stat"><strong><?php echo (int) $total; ?>+</strong> <?php echo $locale === 'zh' ? '已发布机型' : 'published devices'; ?></p>
-    <?php endif; ?>
+    <div class="hub-section-body">
+      <p><?php echo hh_h($sec['desc']); ?></p>
+      <?php if ($isLive && $sec['site_code'] === 'handhelds'): ?>
+      <p class="hub-section-stat"><strong><?php echo (int) $total; ?>+</strong> <?php echo $locale === 'zh' ? '已发布机型' : 'published devices'; ?></p>
+      <?php endif; ?>
+    </div>
     <p class="hub-section-cta">
       <?php if ($url !== ''): ?>
       <a class="btn-primary" href="<?php echo hh_h($url); ?>"><?php echo hh_h(hh_hub_ui($locale, 'cta_enter')); ?></a>

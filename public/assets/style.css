@@ -411,11 +411,15 @@ article h1 { margin-top: .5rem; font-size: 1.85rem; letter-spacing: -.02em; }
   font-size: .92rem;
 }
 .hub-section-stat {
-  margin: 0 0 1rem;
+  margin: 0 0 .75rem;
   font-size: .9rem;
   color: var(--text);
 }
-.hub-section-cta { margin: 0; }
+.hub-section-cta {
+  margin: 0;
+  margin-top: auto;
+  padding-top: .75rem;
+}
 .hub-btn-disabled {
   opacity: .65;
   cursor: default;

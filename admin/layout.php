@@ -21,6 +21,7 @@ function hh_admin_layout_start($active = 'dashboard')
         'news_publish' => array('news_publish.php', 'news_publish'),
         'scrape' => array('scrape.php', 'scrape'),
         'deploy' => array('deploy.php', 'deploy'),
+        'api_settings' => array('api_settings.php', 'api_settings'),
     );
     foreach ($items as $key => $it) {
         $cls = $key === $active ? ' class="active"' : '';

@@ -169,6 +169,102 @@ function hh_blogger_save_config($clientId, $clientSecret, $redirectUri, $blogId)
     return $r;
 }
 
+function hh_game_metadata_igdb_enabled()
+{
+    $secrets = hh_secrets_load();
+    if (!empty($secrets['game_metadata']['use_igdb'])) {
+        return true;
+    }
+    return (string) hh_config_get('game_metadata.use_igdb', '') === '1';
+}
+
+function hh_igdb_config_get($key)
+{
+    return trim((string) hh_config_get('igdb.' . $key, ''));
+}
+
+function hh_igdb_config_display()
+{
+    return array(
+        'client_id' => hh_igdb_config_get('client_id'),
+        'client_secret_masked' => hh_secret_mask(hh_igdb_config_get('client_secret')),
+        'game_use_igdb' => hh_game_metadata_igdb_enabled(),
+    );
+}
+
+/**
+ * @return array{ok:bool,message:string}
+ */
+function hh_igdb_save_config($clientId, $clientSecret, $gameUseIgdb)
+{
+    $clientId = trim((string) $clientId);
+    $clientSecret = trim((string) $clientSecret);
+    $gameUseIgdb = !empty($gameUseIgdb);
+
+    if ($clientId === '') {
+        return array('ok' => false, 'message' => 'Client ID 不能为空');
+    }
+
+    $secrets = hh_secrets_load();
+    $existingSecret = '';
+    if (!empty($secrets['igdb']['client_secret'])) {
+        $existingSecret = (string) $secrets['igdb']['client_secret'];
+    } elseif (hh_igdb_config_get('client_secret') !== '') {
+        $existingSecret = hh_igdb_config_get('client_secret');
+    }
+
+    if ($clientSecret === '') {
+        if ($existingSecret === '') {
+            return array('ok' => false, 'message' => 'Client Secret 不能为空');
+        }
+        $clientSecret = $existingSecret;
+    }
+
+    if (!isset($secrets['igdb']) || !is_array($secrets['igdb'])) {
+        $secrets['igdb'] = array();
+    }
+    $secrets['igdb']['client_id'] = $clientId;
+    $secrets['igdb']['client_secret'] = $clientSecret;
+
+    if (!isset($secrets['game_metadata']) || !is_array($secrets['game_metadata'])) {
+        $secrets['game_metadata'] = array();
+    }
+    $secrets['game_metadata']['use_igdb'] = $gameUseIgdb;
+
+    $r = hh_secrets_write($secrets);
+    if ($r['ok']) {
+        require_once __DIR__ . '/igdb_client.php';
+        hh_igdb_clear_token_cache();
+        $r['message'] = 'IGDB 配置已保存';
+    }
+    return $r;
+}
+
+/**
+ * @return array{ok:bool,message:string}
+ */
+function hh_igdb_delete_credentials()
+{
+    $secrets = hh_secrets_load();
+    unset($secrets['igdb']);
+    if (isset($secrets['game_metadata']) && is_array($secrets['game_metadata'])) {
+        unset($secrets['game_metadata']['use_igdb']);
+        if ($secrets['game_metadata'] === array()) {
+            unset($secrets['game_metadata']);
+        }
+    }
+
+    $r = hh_secrets_write($secrets);
+    if ($r['ok']) {
+        if (is_file(__DIR__ . '/igdb_client.php')) {
+            require_once __DIR__ . '/igdb_client.php';
+            hh_igdb_clear_token_cache();
+        }
+        $r['message'] = 'IGDB 密钥已删除';
+    }
+    return $r;
+}
+
 function hh_config_merge_secrets($cfg)
 {
     $secrets = hh_secrets_load();
@@ -188,6 +284,26 @@ function hh_config_merge_secrets($cfg)
             if (!empty($secrets['blogger'][$k])) {
                 $cfg['blogger'][$k] = (string) $secrets['blogger'][$k];
             }
+        }
+    }
+
+    if (!empty($secrets['igdb']) && is_array($secrets['igdb'])) {
+        if (!isset($cfg['igdb']) || !is_array($cfg['igdb'])) {
+            $cfg['igdb'] = array();
+        }
+        foreach (array('client_id', 'client_secret') as $k) {
+            if (!empty($secrets['igdb'][$k])) {
+                $cfg['igdb'][$k] = (string) $secrets['igdb'][$k];
+            }
+        }
+    }
+
+    if (!empty($secrets['game_metadata']) && is_array($secrets['game_metadata'])) {
+        if (!isset($cfg['game_metadata']) || !is_array($cfg['game_metadata'])) {
+            $cfg['game_metadata'] = array();
+        }
+        if (array_key_exists('use_igdb', $secrets['game_metadata'])) {
+            $cfg['game_metadata']['use_igdb'] = !empty($secrets['game_metadata']['use_igdb']) ? '1' : '0';
         }
     }
 
